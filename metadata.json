@@ -1,0 +1,6 @@
+{
+  "name": "GlyphWorks",
+  "description": "Minimal browser-based font design application to create, edit, preview, import, and export fonts.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
