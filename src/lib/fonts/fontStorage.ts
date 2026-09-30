@@ -226,6 +226,14 @@ export function createNewFontProject(params: {
   };
 }
 
+const scheduleStorageWrite = (fn: () => void) => {
+  if (typeof window !== 'undefined' && 'requestIdleCallback' in window) {
+    (window as any).requestIdleCallback(fn, { timeout: 1500 });
+  } else {
+    setTimeout(fn, 10);
+  }
+};
+
 export const fontStorage = {
   subscribe(callback: (projects: FontProject[]) => void): () => void {
     subscribers.add(callback);
@@ -263,16 +271,18 @@ export const fontStorage = {
 
     notifySubscribers();
 
-    // Asynchronously commit to IndexedDB (No 5MB limit)
-    openDatabase()
-      .then((db) => {
-        const tx = db.transaction(STORE_NAME, 'readwrite');
-        const store = tx.objectStore(STORE_NAME);
-        store.put(updated);
-      })
-      .catch((err) => {
-        console.error('Failed to commit font project to IndexedDB:', err);
-      });
+    // Asynchronously commit to IndexedDB on idle frame so UI never freezes or stutters
+    scheduleStorageWrite(() => {
+      openDatabase()
+        .then((db) => {
+          const tx = db.transaction(STORE_NAME, 'readwrite');
+          const store = tx.objectStore(STORE_NAME);
+          store.put(updated);
+        })
+        .catch((err) => {
+          console.error('Failed to commit font project to IndexedDB:', err);
+        });
+    });
   },
 
   saveProjects(projects: FontProject[]): void {
@@ -293,15 +303,17 @@ export const fontStorage = {
 
     notifySubscribers();
 
-    openDatabase()
-      .then((db) => {
-        const tx = db.transaction(STORE_NAME, 'readwrite');
-        const store = tx.objectStore(STORE_NAME);
-        prepared.forEach((p) => store.put(p));
-      })
-      .catch((err) => {
-        console.error('Failed to commit multiple projects to IndexedDB:', err);
-      });
+    scheduleStorageWrite(() => {
+      openDatabase()
+        .then((db) => {
+          const tx = db.transaction(STORE_NAME, 'readwrite');
+          const store = tx.objectStore(STORE_NAME);
+          prepared.forEach((p) => store.put(p));
+        })
+        .catch((err) => {
+          console.error('Failed to commit multiple projects to IndexedDB:', err);
+        });
+    });
   },
 
   deleteProject(id: string): void {

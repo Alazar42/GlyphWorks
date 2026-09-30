@@ -86,15 +86,27 @@ export const ImportFontDialog: React.FC<ImportFontDialogProps> = ({
 
         for (let i = 0; i < stagedFiles.length; i++) {
           const item = stagedFiles[i];
-          setImportStatus(`Processing ${item.familyName} ${item.styleName} (${i + 1}/${stagedFiles.length})...`);
-          setImportProgress(0);
+          setImportStatus(`Parsing ${item.familyName} ${item.styleName} (${i + 1}/${stagedFiles.length})...`);
+          setImportProgress(Math.round((i / stagedFiles.length) * 100));
+          await new Promise((r) => setTimeout(r, 10));
 
           let parsed = item.parsedProject;
           if (!parsed) {
-            parsed = await parseFontFile(item.file, (pct) => setImportProgress(pct));
+            parsed = await parseFontFile(item.file, (pct) => {
+              const fileWeight = 100 / stagedFiles.length;
+              setImportProgress(Math.round((i * fileWeight) + (pct * (fileWeight / 100))));
+            });
           }
 
           const style = item.styleName.trim() || 'Regular';
+          const parsedGlyphs = parsed?.glyphs || {};
+          const isMega = Object.keys(parsedGlyphs).length > 2000;
+
+          // For mega-fonts, share the base glyph dictionary across styles to avoid multi-hundred megabyte RAM explosion
+          const typeGlyphs = (isMega && i > 0 && types.length > 0)
+            ? types[0].glyphs
+            : (Object.keys(parsedGlyphs).length > 0 ? { ...generateInitialGlyphSet(), ...parsedGlyphs } : generateInitialGlyphSet());
+
           const typeStyle: FontTypeStyle = {
             id: 'type_' + Math.random().toString(36).substring(2, 9),
             name: style,
@@ -102,13 +114,14 @@ export const ImportFontDialog: React.FC<ImportFontDialogProps> = ({
             width: item.width || 'Normal',
             isItalic: item.isItalic,
             metrics: parsed?.metrics || { ...DEFAULT_METRICS },
-            glyphs:
-              parsed?.glyphs && Object.keys(parsed.glyphs).length > 0
-                ? { ...generateInitialGlyphSet(), ...parsed.glyphs }
-                : generateInitialGlyphSet(),
+            glyphs: typeGlyphs,
           };
           types.push(typeStyle);
         }
+
+        setImportProgress(100);
+        setImportStatus('Finalizing font family...');
+        await new Promise((r) => setTimeout(r, 20));
 
         // Sort types by width rank, weight ascending, and slant
         const widthRank: Record<string, number> = {
@@ -165,12 +178,16 @@ export const ImportFontDialog: React.FC<ImportFontDialogProps> = ({
 
         for (let i = 0; i < stagedFiles.length; i++) {
           const item = stagedFiles[i];
-          setImportStatus(`Processing ${item.familyName} ${item.styleName} (${i + 1}/${stagedFiles.length})...`);
-          setImportProgress(0);
+          setImportStatus(`Parsing ${item.familyName} ${item.styleName} (${i + 1}/${stagedFiles.length})...`);
+          setImportProgress(Math.round((i / stagedFiles.length) * 100));
+          await new Promise((r) => setTimeout(r, 10));
 
           let parsed = item.parsedProject;
           if (!parsed) {
-            parsed = await parseFontFile(item.file, (pct) => setImportProgress(pct));
+            parsed = await parseFontFile(item.file, (pct) => {
+              const fileWeight = 100 / stagedFiles.length;
+              setImportProgress(Math.round((i * fileWeight) + (pct * (fileWeight / 100))));
+            });
           }
 
           const style = item.styleName.trim() || 'Regular';
@@ -211,6 +228,10 @@ export const ImportFontDialog: React.FC<ImportFontDialogProps> = ({
 
           importedProjects.push(project);
         }
+
+        setImportProgress(100);
+        setImportStatus('Finalizing font import...');
+        await new Promise((r) => setTimeout(r, 20));
 
         onImportSuccess(importedProjects);
       }

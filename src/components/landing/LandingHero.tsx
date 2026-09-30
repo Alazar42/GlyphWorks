@@ -58,12 +58,22 @@ export const LandingHero: React.FC<LandingHeroProps> = ({
       if (inspected.length > 1) {
         // Bundle as single font project with [number] types
         const types: any[] = [];
-        for (const item of inspected) {
+        for (let i = 0; i < inspected.length; i++) {
+          const item = inspected[i];
           let parsed = item.parsedProject;
           if (!parsed) {
             parsed = await parseFontFile(item.file);
           }
           const style = item.styleName.trim() || 'Regular';
+          const parsedGlyphs = parsed?.glyphs || {};
+          const isMega = Object.keys(parsedGlyphs).length > 2000;
+          const typeGlyphs =
+            isMega && i > 0 && types.length > 0
+              ? types[0].glyphs
+              : Object.keys(parsedGlyphs).length > 0
+              ? { ...generateInitialGlyphSet(), ...parsedGlyphs }
+              : generateInitialGlyphSet();
+
           types.push({
             id: 'type_' + Math.random().toString(36).substring(2, 9),
             name: style,
@@ -71,10 +81,7 @@ export const LandingHero: React.FC<LandingHeroProps> = ({
             width: item.width || 'Normal',
             isItalic: item.isItalic,
             metrics: parsed?.metrics || { ...DEFAULT_METRICS },
-            glyphs:
-              parsed?.glyphs && Object.keys(parsed.glyphs).length > 0
-                ? { ...generateInitialGlyphSet(), ...parsed.glyphs }
-                : generateInitialGlyphSet(),
+            glyphs: typeGlyphs,
           });
         }
 
@@ -119,6 +126,8 @@ export const LandingHero: React.FC<LandingHeroProps> = ({
           activeTypeId: primaryType.id,
           metrics: primaryType.metrics,
           glyphs: primaryType.glyphs,
+          isColorFont: inspected.some((f) => f.isColorFont),
+          primaryScript: inspected[0]?.primaryScript || 'Latin',
         };
 
         fontStorage.saveProjects([singleFamilyProject]);
@@ -158,6 +167,8 @@ export const LandingHero: React.FC<LandingHeroProps> = ({
             parsed?.glyphs && Object.keys(parsed.glyphs).length > 0
               ? { ...generateInitialGlyphSet(), ...parsed.glyphs }
               : generateInitialGlyphSet(),
+          isColorFont: item.isColorFont || parsed?.isColorFont,
+          primaryScript: item.primaryScript || parsed?.primaryScript || 'Latin',
         };
 
         fontStorage.saveProjects([singleProject]);

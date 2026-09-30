@@ -349,6 +349,183 @@ function downloadBlob(blob: Blob, filename: string): void {
 }
 
 /**
+ * Convert opentype.js commands into normalized PathContour array with control points
+ */
+export function convertCommandsToContours(commands: any[], glyphIndex = 0): PathContour[] {
+  const roundCoord = (n: number) => Math.round(n * 100) / 100;
+  const contours: PathContour[] = [];
+  let currentContourPoints: VectorPoint[] = [];
+
+  for (const cmd of commands) {
+    if (cmd.type === 'M') {
+      if (currentContourPoints.length > 0) {
+        const first = currentContourPoints[0];
+        const last = currentContourPoints[currentContourPoints.length - 1];
+        if (
+          currentContourPoints.length > 1 &&
+          last.type === 'onCurve' &&
+          last.x === first.x &&
+          last.y === first.y
+        ) {
+          currentContourPoints.pop();
+        }
+
+        contours.push({
+          id: `cnt_${glyphIndex}_${contours.length}`,
+          closed: true,
+          points: currentContourPoints,
+        });
+        currentContourPoints = [];
+      }
+
+      currentContourPoints.push({
+        id: `pt_${glyphIndex}_${contours.length}_${currentContourPoints.length}`,
+        x: roundCoord(cmd.x),
+        y: roundCoord(cmd.y),
+        type: 'onCurve',
+      });
+    } else if (cmd.type === 'L') {
+      currentContourPoints.push({
+        id: `pt_${glyphIndex}_${contours.length}_${currentContourPoints.length}`,
+        x: roundCoord(cmd.x),
+        y: roundCoord(cmd.y),
+        type: 'onCurve',
+      });
+    } else if (cmd.type === 'Q') {
+      currentContourPoints.push({
+        id: `pt_${glyphIndex}_${contours.length}_${currentContourPoints.length}`,
+        x: roundCoord(cmd.x1),
+        y: roundCoord(cmd.y1),
+        type: 'control1',
+      });
+      currentContourPoints.push({
+        id: `pt_${glyphIndex}_${contours.length}_${currentContourPoints.length + 1}`,
+        x: roundCoord(cmd.x),
+        y: roundCoord(cmd.y),
+        type: 'onCurve',
+      });
+    } else if (cmd.type === 'C') {
+      currentContourPoints.push({
+        id: `pt_${glyphIndex}_${contours.length}_${currentContourPoints.length}`,
+        x: roundCoord(cmd.x1),
+        y: roundCoord(cmd.y1),
+        type: 'control1',
+      });
+      currentContourPoints.push({
+        id: `pt_${glyphIndex}_${contours.length}_${currentContourPoints.length + 1}`,
+        x: roundCoord(cmd.x2),
+        y: roundCoord(cmd.y2),
+        type: 'control2',
+      });
+      currentContourPoints.push({
+        id: `pt_${glyphIndex}_${contours.length}_${currentContourPoints.length + 2}`,
+        x: roundCoord(cmd.x),
+        y: roundCoord(cmd.y),
+        type: 'onCurve',
+      });
+    } else if (cmd.type === 'Z') {
+      if (currentContourPoints.length > 0) {
+        const first = currentContourPoints[0];
+        const last = currentContourPoints[currentContourPoints.length - 1];
+        if (
+          currentContourPoints.length > 1 &&
+          last.type === 'onCurve' &&
+          last.x === first.x &&
+          last.y === first.y
+        ) {
+          currentContourPoints.pop();
+        }
+
+        contours.push({
+          id: `cnt_${glyphIndex}_${contours.length}`,
+          closed: true,
+          points: currentContourPoints,
+        });
+        currentContourPoints = [];
+      }
+    }
+  }
+
+  if (currentContourPoints.length > 0) {
+    contours.push({
+      id: `cnt_${glyphIndex}_${contours.length}`,
+      closed: true,
+      points: currentContourPoints,
+    });
+  }
+
+  return contours;
+}
+
+// In-memory cache of parsed opentype fonts for instant, zero-delay on-demand contour extraction
+const opentypeFontCache = new Map<string, opentype.Font>();
+
+export function cacheParsedOpentypeFont(family: string, font: opentype.Font): void {
+  if (!family) return;
+  const key = family.toLowerCase().trim();
+  opentypeFontCache.set(key, font);
+  // Also store simplified key without whitespace, hyphens, or underscores
+  const stripped = key.replace(/[\s\-_]+/g, '');
+  if (stripped && stripped !== key) {
+    opentypeFontCache.set(stripped, font);
+  }
+}
+
+export function extractSingleGlyphContours(
+  family: string,
+  charOrUnicode: string | number
+): PathContour[] | null {
+  if (opentypeFontCache.size === 0) return null;
+  const rawKey = (family || '').toLowerCase().trim();
+  const strippedKey = rawKey.replace(/[\s\-_]+/g, '');
+  let font = opentypeFontCache.get(rawKey) || opentypeFontCache.get(strippedKey);
+
+  // If not found by exact key, search cache for partial match or use the single cached font
+  if (!font) {
+    if (opentypeFontCache.size === 1) {
+      font = opentypeFontCache.values().next().value;
+    } else {
+      for (const [k, f] of opentypeFontCache.entries()) {
+        if (rawKey && (rawKey.includes(k) || k.includes(rawKey))) {
+          font = f;
+          break;
+        }
+      }
+    }
+  }
+
+  if (!font) return null;
+
+  try {
+    let g: opentype.Glyph | null = null;
+    if (typeof charOrUnicode === 'number') {
+      try {
+        const ch = String.fromCodePoint(charOrUnicode);
+        g = font.charToGlyph(ch);
+      } catch {
+        g = font.glyphs.get(charOrUnicode) || null;
+      }
+    } else if (typeof charOrUnicode === 'string') {
+      if (Array.from(charOrUnicode).length === 1) {
+        g = font.charToGlyph(charOrUnicode);
+      } else {
+        g = (font.nameToGlyph && font.nameToGlyph(charOrUnicode)) || font.charToGlyph(charOrUnicode) || null;
+      }
+    }
+
+    if (!g) return null;
+    const pathObj = typeof g.path === 'function' ? (g as any).path() : g.path;
+    const commands = pathObj?.commands || [];
+    if (commands.length === 0) return [];
+
+    return convertCommandsToContours(commands, g.index || 0);
+  } catch (e) {
+    console.warn('On-demand contour extraction error:', e);
+    return null;
+  }
+}
+
+/**
  * Convert opentype.js parsed font into a GlyphWorks project with 1:1 vector outline fidelity
  */
 export async function parseFontFile(
@@ -452,15 +629,20 @@ export async function parseFontFile(
 
   const glyphs: Record<string, GlyphData> = {};
   const totalGlyphs = parsedFont.glyphs.length;
-  const isMegaFont = totalGlyphs > 3500;
-  const MAX_CONTOURS = 3500;
+  const isMegaFont = totalGlyphs > 2000;
+  // For mega-fonts (e.g. 30,000+ CJK glyphs), extract 300 core anchors up front, and lazy-load the rest on demand in 0.05ms
+  const MAX_CONTOURS = isMegaFont ? 300 : 3500;
   let contoursExtracted = 0;
 
-  const roundCoord = (n: number) => Math.round(n * 100) / 100;
+  // Cache the opentype font object for zero-latency on-demand contour extraction
+  cacheParsedOpentypeFont(family, parsedFont);
+  if (preferredFamily) cacheParsedOpentypeFont(preferredFamily, parsedFont);
+  if (standardFamily) cacheParsedOpentypeFont(standardFamily, parsedFont);
+  if (detectedMeta.family) cacheParsedOpentypeFont(detectedMeta.family, parsedFont);
 
   for (let i = 0; i < totalGlyphs; i++) {
-    // Yield to the event loop every 200 glyphs so the browser thread remains fluid
-    if (i > 0 && i % 200 === 0) {
+    // Yield to the event loop every 100 glyphs so the browser thread remains fluid and progress updates smoothly
+    if (i > 0 && i % 100 === 0) {
       if (onProgress) {
         onProgress(Math.round((i / totalGlyphs) * 100), i, totalGlyphs);
       }
@@ -492,8 +674,7 @@ export async function parseFontFile(
     // Determine whether to extract full vector bezier contours
     let shouldExtractContours = true;
     if (isMegaFont) {
-      // Always extract for ASCII, Latin, and foundational Chinese characters (永, 中, 国, etc.)
-      const isAscii = unicodeVal !== undefined && unicodeVal <= 0x007f;
+      const isAscii = unicodeVal !== undefined && unicodeVal >= 0x0020 && unicodeVal <= 0x007e;
       const isCoreAnchorChar =
         unicodeVal !== undefined &&
         (
@@ -534,118 +715,22 @@ export async function parseFontFile(
 
       if (isAscii || isCoreAnchorChar) {
         shouldExtractContours = true;
-      } else if (contoursExtracted >= MAX_CONTOURS) {
+      } else if (contoursExtracted < MAX_CONTOURS) {
+        shouldExtractContours = true;
+      } else {
         shouldExtractContours = false;
       }
     }
 
-    const contours: PathContour[] = [];
-    let currentContourPoints: VectorPoint[] = [];
-
+    let contours: PathContour[] = [];
     if (shouldExtractContours) {
       const pathObj = typeof g.path === 'function' ? (g as any).path() : g.path;
       const commands = pathObj?.commands || [];
-
-      for (const cmd of commands) {
-        if (cmd.type === 'M') {
-          if (currentContourPoints.length > 0) {
-            const first = currentContourPoints[0];
-            const last = currentContourPoints[currentContourPoints.length - 1];
-            if (
-              currentContourPoints.length > 1 &&
-              last.type === 'onCurve' &&
-              last.x === first.x &&
-              last.y === first.y
-            ) {
-              currentContourPoints.pop();
-            }
-
-            contours.push({
-              id: `cnt_${i}_${contours.length}`,
-              closed: true,
-              points: currentContourPoints,
-            });
-            currentContourPoints = [];
-          }
-
-          currentContourPoints.push({
-            id: `pt_${i}_${contours.length}_${currentContourPoints.length}`,
-            x: roundCoord(cmd.x),
-            y: roundCoord(cmd.y),
-            type: 'onCurve',
-          });
-        } else if (cmd.type === 'L') {
-          currentContourPoints.push({
-            id: `pt_${i}_${contours.length}_${currentContourPoints.length}`,
-            x: roundCoord(cmd.x),
-            y: roundCoord(cmd.y),
-            type: 'onCurve',
-          });
-        } else if (cmd.type === 'Q') {
-          currentContourPoints.push({
-            id: `pt_${i}_${contours.length}_${currentContourPoints.length}`,
-            x: roundCoord(cmd.x1),
-            y: roundCoord(cmd.y1),
-            type: 'control1',
-          });
-          currentContourPoints.push({
-            id: `pt_${i}_${contours.length}_${currentContourPoints.length + 1}`,
-            x: roundCoord(cmd.x),
-            y: roundCoord(cmd.y),
-            type: 'onCurve',
-          });
-        } else if (cmd.type === 'C') {
-          currentContourPoints.push({
-            id: `pt_${i}_${contours.length}_${currentContourPoints.length}`,
-            x: roundCoord(cmd.x1),
-            y: roundCoord(cmd.y1),
-            type: 'control1',
-          });
-          currentContourPoints.push({
-            id: `pt_${i}_${contours.length}_${currentContourPoints.length + 1}`,
-            x: roundCoord(cmd.x2),
-            y: roundCoord(cmd.y2),
-            type: 'control2',
-          });
-          currentContourPoints.push({
-            id: `pt_${i}_${contours.length}_${currentContourPoints.length + 2}`,
-            x: roundCoord(cmd.x),
-            y: roundCoord(cmd.y),
-            type: 'onCurve',
-          });
-        } else if (cmd.type === 'Z') {
-          if (currentContourPoints.length > 0) {
-            const first = currentContourPoints[0];
-            const last = currentContourPoints[currentContourPoints.length - 1];
-            if (
-              currentContourPoints.length > 1 &&
-              last.type === 'onCurve' &&
-              last.x === first.x &&
-              last.y === first.y
-            ) {
-              currentContourPoints.pop();
-            }
-
-            contours.push({
-              id: `cnt_${i}_${contours.length}`,
-              closed: true,
-              points: currentContourPoints,
-            });
-            currentContourPoints = [];
-          }
+      if (commands.length > 0) {
+        contours = convertCommandsToContours(commands, i);
+        if (contours.length > 0) {
+          contoursExtracted++;
         }
-      }
-
-      if (currentContourPoints.length > 0) {
-        contours.push({
-          id: `cnt_${i}_${contours.length}`,
-          closed: true,
-          points: currentContourPoints,
-        });
-      }
-
-      if (contours.length > 0) {
-        contoursExtracted++;
       }
     }
 

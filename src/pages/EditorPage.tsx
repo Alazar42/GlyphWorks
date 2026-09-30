@@ -1,7 +1,8 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { FontProject, GlyphData, EditorTool, PathContour, FontMetrics, VectorPoint, FontTypeStyle } from '@/src/types/font';
 import { fontStorage } from '@/src/lib/fonts/fontStorage';
 import { createDefaultGlyphContours } from '@/src/lib/fonts/defaultFont';
+import { extractSingleGlyphContours } from '@/src/lib/fonts/fontConverter';
 import { EditorTopBar } from '@/src/components/editor/EditorTopBar';
 import { EditorToolbar } from '@/src/components/editor/EditorToolbar';
 import { GlyphCanvas } from '@/src/components/editor/GlyphCanvas';
@@ -96,10 +97,10 @@ export const EditorPage: React.FC<EditorPageProps> = ({ fontId, onNavigate }) =>
     }
   }, [fontId]);
 
-  // Push new state to history (capped at 10 for mega-fonts, 25 for normal fonts)
+  // Push new state to history (capped at 5 for mega-fonts, 25 for normal fonts to conserve memory)
   const pushStateToHistory = useCallback((newProject: FontProject) => {
-    const isMega = Object.keys(newProject.glyphs).length > 3500;
-    const maxEntries = isMega ? 10 : 25;
+    const isMega = Object.keys(newProject.glyphs).length > 2000;
+    const maxEntries = isMega ? 5 : 25;
     setHistory((prev) => {
       const trimmed = prev.slice(0, historyIndex + 1);
       const next = [...trimmed, newProject];
@@ -208,7 +209,7 @@ export const EditorPage: React.FC<EditorPageProps> = ({ fontId, onNavigate }) =>
       width: data.width,
       metrics: { ...project.metrics },
       // Copy current glyph contours as starting base for the new weight
-      glyphs: JSON.parse(JSON.stringify(project.glyphs)),
+      glyphs: { ...project.glyphs },
     };
 
     const currentTypes = project.types || [];
@@ -356,16 +357,29 @@ export const EditorPage: React.FC<EditorPageProps> = ({ fontId, onNavigate }) =>
     );
   }
 
-  // Active glyph
-  const activeGlyph: GlyphData = project.glyphs[selectedChar] || {
-    unicode: selectedChar.charCodeAt(0),
-    name: `uni${selectedChar.charCodeAt(0).toString(16)}`,
-    char: selectedChar,
-    advanceWidth: 600,
-    leftSideBearing: 40,
-    contours: [],
-    hasCustomPath: false,
-  };
+  // Active glyph: with lazy on-demand contour extraction if not yet extracted for mega-fonts
+  const activeGlyph: GlyphData = useMemo(() => {
+    const existing = project.glyphs[selectedChar];
+    if (existing) {
+      if ((!existing.contours || existing.contours.length === 0) && !existing.hasCustomPath) {
+        const onDemand = extractSingleGlyphContours(project.family, existing.unicode ?? selectedChar);
+        if (onDemand && onDemand.length > 0) {
+          existing.contours = onDemand;
+          existing.hasCustomPath = true;
+        }
+      }
+      return existing;
+    }
+    return {
+      unicode: selectedChar.codePointAt(0) || 65,
+      name: `uni${(selectedChar.codePointAt(0) || 65).toString(16).toUpperCase()}`,
+      char: selectedChar,
+      advanceWidth: 600,
+      leftSideBearing: 40,
+      contours: [],
+      hasCustomPath: false,
+    };
+  }, [project.glyphs, selectedChar, project.family]);
 
   // Primary selected point for inspector
   let currentSelectedPoint: VectorPoint | null = null;
@@ -486,11 +500,20 @@ export const EditorPage: React.FC<EditorPageProps> = ({ fontId, onNavigate }) =>
       contours: updatedContours,
     };
 
-    const hasAnyColor =
-      Boolean(color) ||
-      Object.values(project.glyphs).some(
-        (g) => g.char !== selectedChar && (g.color || g.isColor || g.contours.some((c) => !!c.color))
-      );
+    let hasAnyColor = Boolean(color) || Boolean(project.isColorFont);
+    if (!color && project.isColorFont) {
+      let foundOtherColor = false;
+      for (const k in project.glyphs) {
+        if (k !== selectedChar) {
+          const g = project.glyphs[k];
+          if (g.color || g.isColor || (g.contours && g.contours.some((c) => !!c.color))) {
+            foundOtherColor = true;
+            break;
+          }
+        }
+      }
+      hasAnyColor = foundOtherColor;
+    }
 
     const updatedProject: FontProject = {
       ...project,

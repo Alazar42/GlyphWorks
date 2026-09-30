@@ -23,23 +23,31 @@ export const GlyphBrowser: React.FC<GlyphBrowserProps> = ({
   const [searchQuery, setSearchQuery] = useState('');
   const [currentPage, setCurrentPage] = useState(0);
 
-  const allGlyphs = useMemo(() => Object.values(glyphs), [glyphs]);
+  const glyphCount = glyphs ? Object.keys(glyphs).length : 0;
 
-  // Discover all scripts currently present in the font (optimized sampling for mega-fonts)
+  // Cached glyph array: only recreates when glyph set size changes (zero lag during point moves or canvas interactions)
+  const allGlyphs = useMemo(() => {
+    return Object.values(glyphs);
+  }, [glyphCount]);
+
+  // Discover all scripts present in the font using step-sampling across mega-fonts
   const availableScripts = useMemo(() => {
     const scripts = new Set<string>();
     const total = allGlyphs.length;
-    const step = total > 2000 ? Math.floor(total / 1500) : 1;
+    const step = total > 2000 ? Math.floor(total / 800) : 1;
     for (let i = 0; i < total; i += step) {
       scripts.add(detectCharacterScript(allGlyphs[i].char));
     }
-    // Always include selected character script
-    scripts.add(detectCharacterScript(selectedChar));
     return Array.from(scripts).sort();
-  }, [allGlyphs, selectedChar]);
+  }, [allGlyphs]);
 
   const filteredGlyphs = useMemo(() => {
     const query = searchQuery.trim().toLowerCase();
+    const hasFilter = query.length > 0 || filterScript !== 'all' || filterCategory !== 'all';
+    if (!hasFilter) {
+      return allGlyphs;
+    }
+
     return allGlyphs.filter((g) => {
       if (query) {
         const matchChar = g.char.toLowerCase().includes(query);
@@ -73,16 +81,25 @@ export const GlyphBrowser: React.FC<GlyphBrowserProps> = ({
   const totalPages = Math.max(1, Math.ceil(filteredGlyphs.length / PAGE_SIZE));
   const safePage = Math.min(Math.max(0, currentPage), totalPages - 1);
 
+  // O(1) character index lookup for instant page switching without linear search
+  const charToIndex = useMemo(() => {
+    const map = new Map<string, number>();
+    for (let i = 0; i < filteredGlyphs.length; i++) {
+      map.set(filteredGlyphs[i].char, i);
+    }
+    return map;
+  }, [filteredGlyphs]);
+
   // Automatically sync page index when selectedChar changes so the active glyph is in the current page
   useEffect(() => {
-    const idx = filteredGlyphs.findIndex((g) => g.char === selectedChar);
-    if (idx !== -1) {
+    const idx = charToIndex.get(selectedChar);
+    if (idx !== undefined) {
       const targetPage = Math.floor(idx / PAGE_SIZE);
       if (targetPage !== safePage) {
         setCurrentPage(targetPage);
       }
     }
-  }, [selectedChar, filteredGlyphs]);
+  }, [selectedChar, charToIndex]);
 
   // Reset page to 0 when search query or category/script filter changes
   useEffect(() => {

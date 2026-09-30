@@ -345,7 +345,9 @@ export function detectFontPrimaryLanguage(
     }
     // 3rd priority: any glyph in unicode range with contours
     if (fallbackRange) {
+      let count = 0;
       for (const ch in glyphs) {
+        if (++count > 2000) break;
         const g = glyphs[ch];
         const code = g.unicode || (g.char ? g.char.codePointAt(0) : 0) || 0;
         if (code >= fallbackRange[0] && code <= fallbackRange[1]) {
@@ -356,7 +358,9 @@ export function detectFontPrimaryLanguage(
         }
       }
       // 4th priority: any glyph in unicode range
+      count = 0;
       for (const ch in glyphs) {
+        if (++count > 2000) break;
         const g = glyphs[ch];
         const code = g.unicode || (g.char ? g.char.codePointAt(0) : 0) || 0;
         if (code >= fallbackRange[0] && code <= fallbackRange[1]) {
