@@ -227,11 +227,10 @@ export function createNewFontProject(params: {
 }
 
 const scheduleStorageWrite = (fn: () => void) => {
-  if (typeof window !== 'undefined' && 'requestIdleCallback' in window) {
-    (window as any).requestIdleCallback(fn, { timeout: 1500 });
-  } else {
-    setTimeout(fn, 10);
-  }
+  // Use setTimeout instead of requestIdleCallback — rIC can trigger Chrome's
+  // "Cannot read properties of undefined (reading 'startTime')" Performance Observer bug.
+  // A short-delay setTimeout achieves the same non-blocking write without the crash.
+  setTimeout(fn, 80);
 };
 
 export const fontStorage = {

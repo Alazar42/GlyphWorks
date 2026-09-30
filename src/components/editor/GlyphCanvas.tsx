@@ -248,71 +248,58 @@ export const GlyphCanvas: React.FC<GlyphCanvasProps> = ({
     };
   };
 
-  // Keep latest pan, zoom and metrics references for active wheel listener
-  const zoomPanStateRef = useRef({
-    panX,
-    panY,
-    zoom,
-    metrics,
-    screenToFont,
-    onUpdatePan,
-    onUpdateZoomAndPan,
-  });
+  // Keep latest pan, zoom and metrics references for the non-passive wheel listener (avoids stale closures)
+  const zoomPanStateRef = useRef({ panX, panY, zoom, metrics, onUpdatePan, onUpdateZoomAndPan });
 
   useEffect(() => {
-    zoomPanStateRef.current = {
-      panX,
-      panY,
-      zoom,
-      metrics,
-      screenToFont,
-      onUpdatePan,
-      onUpdateZoomAndPan,
-    };
+    zoomPanStateRef.current = { panX, panY, zoom, metrics, onUpdatePan, onUpdateZoomAndPan };
   });
 
-  // Canvas Zoom & Pan with native non-passive listener to permit e.preventDefault()
+  // Canvas Zoom & Pan — native non-passive listener so e.preventDefault() succeeds
   useEffect(() => {
     const el = containerRef.current;
     if (!el) return;
 
+    let rafId: number | null = null;
+
     const handleCanvasWheel = (e: WheelEvent) => {
       e.preventDefault();
 
-      const {
-        panX: curPanX,
-        panY: curPanY,
-        zoom: curZoom,
-        metrics: curMetrics,
-        screenToFont: curScreenToFont,
-        onUpdatePan: curOnUpdatePan,
-        onUpdateZoomAndPan: curOnUpdateZoomAndPan,
-      } = zoomPanStateRef.current;
+      const { panX: curPanX, panY: curPanY, zoom: curZoom, metrics: curMetrics, onUpdatePan: curOnUpdatePan, onUpdateZoomAndPan: curOnUpdateZoomAndPan } = zoomPanStateRef.current;
 
       const rect = el.getBoundingClientRect();
       const mouseX = e.clientX - rect.left;
       const mouseY = e.clientY - rect.top;
 
-      // Trackpad pan or wheel scroll without meta/ctrl
+      // Trackpad 2-finger pan (no modifier key, deltaX dominant or small deltaY)
       if (!e.ctrlKey && !e.metaKey && (Math.abs(e.deltaX) > Math.abs(e.deltaY) || Math.abs(e.deltaY) < 30)) {
         curOnUpdatePan(curPanX - e.deltaX * 0.8, curPanY - e.deltaY * 0.8);
         return;
       }
 
-      // Focal mouse zoom anchored to cursor font position
-      const fontPos = curScreenToFont(e.clientX, e.clientY, true);
-      const zoomFactor = e.deltaY < 0 ? 1.15 : 1 / 1.15;
+      // Focal zoom anchored to cursor — compute font pos inline from current ref values
+      const originX = rect.width / 2 + curPanX;
+      const originY = rect.height / 2 + curPanY + curMetrics.unitsPerEm * 0.25 * curZoom;
+      const fontX = (e.clientX - rect.left - originX) / curZoom;
+      const fontY = (originY - (e.clientY - rect.top)) / curZoom;
+
+      const zoomFactor = e.deltaY < 0 ? 1.12 : 1 / 1.12;
       const newZoom = Math.min(8.0, Math.max(0.08, curZoom * zoomFactor));
 
-      const newPanX = mouseX - rect.width / 2 - fontPos.x * newZoom;
-      const newPanY = mouseY - rect.height / 2 - (curMetrics.unitsPerEm * 0.25 - fontPos.y) * newZoom;
+      const newPanX = mouseX - rect.width / 2 - fontX * newZoom;
+      const newPanY = mouseY - rect.height / 2 - (curMetrics.unitsPerEm * 0.25 - fontY) * newZoom;
 
-      curOnUpdateZoomAndPan(newZoom, Math.round(newPanX), Math.round(newPanY));
+      if (rafId !== null) cancelAnimationFrame(rafId);
+      rafId = requestAnimationFrame(() => {
+        curOnUpdateZoomAndPan(newZoom, Math.round(newPanX), Math.round(newPanY));
+        rafId = null;
+      });
     };
 
     el.addEventListener('wheel', handleCanvasWheel, { passive: false });
     return () => {
       el.removeEventListener('wheel', handleCanvasWheel);
+      if (rafId !== null) cancelAnimationFrame(rafId);
     };
   }, []);
 
