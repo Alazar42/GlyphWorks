@@ -20,6 +20,8 @@ export const ImportFontDialog: React.FC<ImportFontDialogProps> = ({
   const [isDragging, setIsDragging] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [importStatus, setImportStatus] = useState<string>('');
+  const [importProgress, setImportProgress] = useState<number>(0);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Staged files for review & type editing
@@ -30,6 +32,7 @@ export const ImportFontDialog: React.FC<ImportFontDialogProps> = ({
   const handleProcessFiles = async (files: FileList | File[]) => {
     setError(null);
     setIsLoading(true);
+    setImportStatus('Inspecting font metadata...');
 
     try {
       const fileArr = Array.from(files).filter((f) =>
@@ -54,6 +57,7 @@ export const ImportFontDialog: React.FC<ImportFontDialogProps> = ({
       setError(err?.message || 'Failed to inspect font files.');
     } finally {
       setIsLoading(false);
+      setImportStatus('');
     }
   };
 
@@ -80,10 +84,14 @@ export const ImportFontDialog: React.FC<ImportFontDialogProps> = ({
       if (importAsFamily && stagedFiles.length > 1) {
         const types: FontTypeStyle[] = [];
 
-        for (const item of stagedFiles) {
+        for (let i = 0; i < stagedFiles.length; i++) {
+          const item = stagedFiles[i];
+          setImportStatus(`Processing ${item.familyName} ${item.styleName} (${i + 1}/${stagedFiles.length})...`);
+          setImportProgress(0);
+
           let parsed = item.parsedProject;
           if (!parsed) {
-            parsed = await parseFontFile(item.file);
+            parsed = await parseFontFile(item.file, (pct) => setImportProgress(pct));
           }
 
           const style = item.styleName.trim() || 'Regular';
@@ -102,11 +110,31 @@ export const ImportFontDialog: React.FC<ImportFontDialogProps> = ({
           types.push(typeStyle);
         }
 
-        // Sort types by weight ascending (100 -> 900)
-        types.sort((a, b) => a.weight - b.weight);
+        // Sort types by width rank, weight ascending, and slant
+        const widthRank: Record<string, number> = {
+          UltraCondensed: 1,
+          ExtraCondensed: 2,
+          Condensed: 3,
+          SemiCondensed: 4,
+          Normal: 5,
+          SemiExpanded: 6,
+          Expanded: 7,
+          ExtraExpanded: 8,
+          UltraExpanded: 9,
+        };
+        types.sort((a, b) => {
+          const wa = widthRank[a.width] || 5;
+          const wb = widthRank[b.width] || 5;
+          if (wa !== wb) return wa - wb;
+          if (a.weight !== b.weight) return a.weight - b.weight;
+          return (a.isItalic ? 1 : 0) - (b.isItalic ? 1 : 0);
+        });
 
-        // Pick primary type: preferred Regular (400), or first
-        const primaryType = types.find((t) => t.weight === 400 && !t.isItalic) || types[0];
+        // Pick primary type: preferred Regular (400) Normal, or first
+        const primaryType =
+          types.find((t) => t.weight === 400 && !t.isItalic && t.width === 'Normal') ||
+          types.find((t) => t.weight === 400 && !t.isItalic) ||
+          types[0];
 
         const singleFamilyProject: FontProject = {
           id: 'fnt_' + Math.random().toString(36).substring(2, 9) + Date.now().toString(36),
@@ -126,6 +154,8 @@ export const ImportFontDialog: React.FC<ImportFontDialogProps> = ({
           activeTypeId: primaryType.id,
           metrics: primaryType.metrics,
           glyphs: primaryType.glyphs,
+          isColorFont: stagedFiles.some((f) => f.isColorFont) || types.some((t) => t.isColorFont),
+          primaryScript: stagedFiles[0]?.primaryScript || types[0]?.primaryScript || 'Latin',
         };
 
         onImportSuccess([singleFamilyProject]);
@@ -133,10 +163,14 @@ export const ImportFontDialog: React.FC<ImportFontDialogProps> = ({
         // CASE B: Single font work (or separate individual fonts)
         const importedProjects: FontProject[] = [];
 
-        for (const item of stagedFiles) {
+        for (let i = 0; i < stagedFiles.length; i++) {
+          const item = stagedFiles[i];
+          setImportStatus(`Processing ${item.familyName} ${item.styleName} (${i + 1}/${stagedFiles.length})...`);
+          setImportProgress(0);
+
           let parsed = item.parsedProject;
           if (!parsed) {
-            parsed = await parseFontFile(item.file);
+            parsed = await parseFontFile(item.file, (pct) => setImportProgress(pct));
           }
 
           const style = item.styleName.trim() || 'Regular';
@@ -152,6 +186,7 @@ export const ImportFontDialog: React.FC<ImportFontDialogProps> = ({
               parsed?.glyphs && Object.keys(parsed.glyphs).length > 0
                 ? { ...generateInitialGlyphSet(), ...parsed.glyphs }
                 : generateInitialGlyphSet(),
+            isColorFont: item.isColorFont || parsed?.isColorFont,
           };
 
           const project: FontProject = {
@@ -170,6 +205,8 @@ export const ImportFontDialog: React.FC<ImportFontDialogProps> = ({
             activeTypeId: initialType.id,
             metrics: initialType.metrics,
             glyphs: initialType.glyphs,
+            isColorFont: item.isColorFont || parsed?.isColorFont,
+            primaryScript: item.primaryScript || parsed?.primaryScript || 'Latin',
           };
 
           importedProjects.push(project);
@@ -185,6 +222,8 @@ export const ImportFontDialog: React.FC<ImportFontDialogProps> = ({
       setError(err?.message || 'Error creating font projects');
     } finally {
       setIsLoading(false);
+      setImportStatus('');
+      setImportProgress(0);
     }
   };
 
@@ -192,6 +231,8 @@ export const ImportFontDialog: React.FC<ImportFontDialogProps> = ({
     setStagedFiles([]);
     setFamilyGroupName('');
     setImportAsFamily(true);
+    setImportStatus('');
+    setImportProgress(0);
     setError(null);
   };
 
@@ -235,18 +276,18 @@ export const ImportFontDialog: React.FC<ImportFontDialogProps> = ({
             onDragOver={handleDragOver}
             onDragLeave={handleDragLeave}
             onDrop={handleDrop}
-            className={`border border-dashed p-10 text-center transition-colors flex flex-col items-center justify-center gap-3 ${
+            className={`border border-dashed p-10 text-center transition-colors flex flex-col items-center justify-center gap-3 rounded-xs ${
               isDragging
-                ? 'border-sky-400 bg-neutral-800/60'
-                : 'border-neutral-800 bg-neutral-900/40 hover:border-neutral-700'
+                ? 'border-sky-500 bg-sky-50/50 dark:bg-neutral-800/60'
+                : 'border-neutral-300 dark:border-neutral-800 bg-neutral-50/50 dark:bg-neutral-900/40 hover:border-neutral-400 dark:hover:border-neutral-700'
             }`}
           >
-            <div className="w-12 h-12 rounded-full bg-neutral-900 border border-neutral-800 flex items-center justify-center text-neutral-400">
+            <div className="w-12 h-12 rounded-full bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 flex items-center justify-center text-neutral-500 dark:text-neutral-400 shadow-2xs">
               <Upload className="w-6 h-6" />
             </div>
 
             <div className="space-y-1">
-              <p className="text-sm font-medium text-neutral-200">
+              <p className="text-sm font-medium text-neutral-800 dark:text-neutral-200">
                 Drop font files or whole font family here
               </p>
               <p className="text-xs text-neutral-500">
@@ -254,7 +295,7 @@ export const ImportFontDialog: React.FC<ImportFontDialogProps> = ({
               </p>
             </div>
 
-            <div className="text-[10px] text-neutral-500 uppercase tracking-widest font-mono my-1">
+            <div className="text-[10px] text-neutral-400 uppercase tracking-widest font-mono my-1">
               or
             </div>
 
@@ -281,13 +322,13 @@ export const ImportFontDialog: React.FC<ImportFontDialogProps> = ({
         ) : (
           // Review & Type Editing Stage (Family Awareness)
           <div className="space-y-4">
-            <div className="bg-neutral-900/60 border border-neutral-850 p-4 rounded-xs space-y-3">
+            <div className="bg-neutral-50 dark:bg-neutral-900/60 border border-neutral-200 dark:border-neutral-850 p-4 rounded-xs space-y-3">
               <div className="flex items-center justify-between">
-                <label className="text-xs font-mono uppercase tracking-wider text-neutral-400 flex items-center gap-1.5 font-semibold">
-                  <Layers className="w-3.5 h-3.5 text-sky-400" />
+                <label className="text-xs font-mono uppercase tracking-wider text-neutral-600 dark:text-neutral-400 flex items-center gap-1.5 font-semibold">
+                  <Layers className="w-3.5 h-3.5 text-sky-500 dark:text-sky-400" />
                   <span>Font Family Name</span>
                 </label>
-                <span className="text-[11px] font-mono text-neutral-400">
+                <span className="text-[11px] font-mono text-neutral-500 dark:text-neutral-400">
                   {stagedFiles.length} {stagedFiles.length === 1 ? 'file' : 'files detected'}
                 </span>
               </div>
@@ -296,7 +337,7 @@ export const ImportFontDialog: React.FC<ImportFontDialogProps> = ({
                 value={familyGroupName}
                 onChange={(e) => setFamilyGroupName(e.target.value)}
                 placeholder="e.g. Inter, Roboto, Cabinet Grotesk"
-                className="w-full bg-neutral-950 border border-neutral-800 text-sm text-neutral-100 px-3 py-1.5 font-sans outline-none focus:border-neutral-600 rounded-xs"
+                className="w-full bg-white dark:bg-neutral-950 border border-neutral-300 dark:border-neutral-800 text-sm text-neutral-900 dark:text-neutral-100 px-3 py-1.5 font-sans outline-none focus:border-sky-500 dark:focus:border-neutral-600 rounded-xs"
                 required
               />
 
@@ -304,21 +345,21 @@ export const ImportFontDialog: React.FC<ImportFontDialogProps> = ({
               {stagedFiles.length > 1 && (
                 <div
                   onClick={() => setImportAsFamily(!importAsFamily)}
-                  className="flex items-start gap-2 pt-2 border-t border-neutral-800/80 cursor-pointer select-none group"
+                  className="flex items-start gap-2 pt-2 border-t border-neutral-200 dark:border-neutral-800/80 cursor-pointer select-none group"
                 >
-                  <div className="mt-0.5 text-sky-400">
+                  <div className="mt-0.5 text-sky-600 dark:text-sky-400">
                     {importAsFamily ? (
                       <CheckSquare className="w-4 h-4" />
                     ) : (
-                      <Square className="w-4 h-4 text-neutral-600 group-hover:text-neutral-400" />
+                      <Square className="w-4 h-4 text-neutral-400 dark:text-neutral-600 group-hover:text-neutral-600 dark:group-hover:text-neutral-400" />
                     )}
                   </div>
                   <div>
-                    <p className="text-xs font-medium text-neutral-200">
-                      Import as a single Family project with [{stagedFiles.length} types]
+                    <p className="text-xs font-medium text-neutral-800 dark:text-neutral-200">
+                      Bundle as Family ({stagedFiles.length} styles)
                     </p>
                     <p className="text-[11px] text-neutral-500 leading-relaxed">
-                      Creates only one unified font project in your workspace with all styles bundled together. You can switch between types seamlessly in the editor.
+                      Groups all imported styles into a single font project with quick style switching.
                     </p>
                   </div>
                 </div>
@@ -326,8 +367,8 @@ export const ImportFontDialog: React.FC<ImportFontDialogProps> = ({
             </div>
 
             {/* List of Detected Fonts with Type Editors */}
-            <div className="border border-neutral-850 divide-y divide-neutral-900 max-h-72 overflow-y-auto bg-neutral-950 rounded-xs">
-              <div className="px-3 py-2 bg-neutral-900/40 text-[10px] font-mono uppercase tracking-wider text-neutral-500 grid grid-cols-12 gap-2">
+            <div className="border border-neutral-200 dark:border-neutral-850 divide-y divide-neutral-200 dark:divide-neutral-900 max-h-72 overflow-y-auto bg-white dark:bg-neutral-950 rounded-xs">
+              <div className="px-3 py-2 bg-neutral-100/70 dark:bg-neutral-900/40 text-[10px] font-mono uppercase tracking-wider text-neutral-500 grid grid-cols-12 gap-2">
                 <span className="col-span-4">File Name</span>
                 <span className="col-span-3">Style / Subfamily</span>
                 <span className="col-span-3">Weight Class</span>
@@ -337,12 +378,31 @@ export const ImportFontDialog: React.FC<ImportFontDialogProps> = ({
               {stagedFiles.map((item) => (
                 <div key={item.id} className="px-3 py-2.5 grid grid-cols-12 gap-2 items-center text-xs">
                   <div className="col-span-4 min-w-0 pr-2">
-                    <p className="text-neutral-200 font-mono text-[11px] truncate" title={item.fileName}>
-                      {item.fileName}
-                    </p>
-                    <span className="text-[10px] text-neutral-500 font-mono">
-                      {item.glyphCount ? `${item.glyphCount} glyphs` : 'vector font'}
-                    </span>
+                    <div className="flex items-center gap-1.5">
+                      {item.sampleChars && (
+                        <span className="w-5 h-5 flex items-center justify-center bg-neutral-100 dark:bg-neutral-850 border border-neutral-300 dark:border-neutral-700 text-sky-600 dark:text-sky-400 font-bold text-xs shrink-0 rounded-xs">
+                          {item.sampleChars.slice(0, 1)}
+                        </span>
+                      )}
+                      <p className="text-neutral-800 dark:text-neutral-200 font-mono text-[11px] truncate" title={item.fileName}>
+                        {item.fileName}
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-1.5 mt-0.5">
+                      <span className="text-[10px] text-neutral-500 font-mono">
+                        {item.glyphCount ? `${item.glyphCount} glyphs` : 'vector font'}
+                      </span>
+                      {item.primaryScript && item.primaryScript !== 'Latin' && (
+                        <span className="text-[9px] px-1 py-0.2 bg-amber-500/10 text-amber-700 dark:text-amber-300 border border-amber-500/30 rounded-xs font-mono">
+                          {item.primaryScript}
+                        </span>
+                      )}
+                      {item.isColorFont && (
+                        <span className="text-[9px] px-1 py-0.2 bg-purple-500/10 text-purple-700 dark:text-purple-300 border border-purple-500/30 rounded-xs font-mono">
+                          Color
+                        </span>
+                      )}
+                    </div>
                   </div>
 
                   <div className="col-span-3">
@@ -351,7 +411,7 @@ export const ImportFontDialog: React.FC<ImportFontDialogProps> = ({
                       value={item.styleName}
                       onChange={(e) => handleUpdateStagedItem(item.id, { styleName: e.target.value })}
                       placeholder="e.g. Regular, Bold"
-                      className="w-full bg-neutral-900 border border-neutral-800 px-2 py-1 text-xs text-neutral-100 font-mono outline-none focus:border-neutral-600 rounded-xs"
+                      className="w-full bg-neutral-50 dark:bg-neutral-900 border border-neutral-300 dark:border-neutral-800 px-2 py-1 text-xs text-neutral-900 dark:text-neutral-100 font-mono outline-none focus:border-sky-500 dark:focus:border-neutral-600 rounded-xs"
                     />
                   </div>
 
@@ -361,7 +421,7 @@ export const ImportFontDialog: React.FC<ImportFontDialogProps> = ({
                       onChange={(e) =>
                         handleUpdateStagedItem(item.id, { weight: parseInt(e.target.value, 10) })
                       }
-                      className="w-full bg-neutral-900 border border-neutral-800 px-2 py-1 text-xs text-neutral-200 font-mono outline-none focus:border-neutral-600 cursor-pointer rounded-xs"
+                      className="w-full bg-neutral-50 dark:bg-neutral-900 border border-neutral-300 dark:border-neutral-800 px-2 py-1 text-xs text-neutral-900 dark:text-neutral-200 font-mono outline-none focus:border-sky-500 dark:focus:border-neutral-600 cursor-pointer rounded-xs"
                     >
                       <option value={100}>100 - Thin</option>
                       <option value={200}>200 - ExtraLight</option>
@@ -379,7 +439,7 @@ export const ImportFontDialog: React.FC<ImportFontDialogProps> = ({
                   <div className="col-span-2 text-right">
                     <button
                       onClick={() => handleRemoveStagedItem(item.id)}
-                      className="text-neutral-500 hover:text-rose-400 p-1 transition-colors cursor-pointer"
+                      className="text-neutral-400 hover:text-rose-500 dark:text-neutral-500 dark:hover:text-rose-400 p-1 transition-colors cursor-pointer"
                       title="Remove from import"
                     >
                       <Trash2 className="w-3.5 h-3.5 inline" />
@@ -388,6 +448,22 @@ export const ImportFontDialog: React.FC<ImportFontDialogProps> = ({
                 </div>
               ))}
             </div>
+
+            {/* Live Progress Bar when importing */}
+            {isLoading && importStatus && (
+              <div className="p-3 bg-sky-950/40 border border-sky-800/60 rounded-xs space-y-2">
+                <div className="flex items-center justify-between text-xs font-mono text-sky-200">
+                  <span className="truncate pr-2">{importStatus}</span>
+                  {importProgress > 0 && <span className="shrink-0">{importProgress}%</span>}
+                </div>
+                <div className="w-full bg-neutral-800 h-1.5 rounded-full overflow-hidden">
+                  <div
+                    className="bg-sky-500 h-full transition-all duration-150"
+                    style={{ width: `${Math.max(4, importProgress)}%` }}
+                  />
+                </div>
+              </div>
+            )}
 
             {/* Bottom Actions */}
             <div className="flex items-center justify-between pt-2">
@@ -418,10 +494,10 @@ export const ImportFontDialog: React.FC<ImportFontDialogProps> = ({
                 >
                   <CheckCircle2 className="w-3.5 h-3.5 mr-1" />
                   {importAsFamily && stagedFiles.length > 1
-                    ? `Import as Single Family Project (${stagedFiles.length} types)`
+                    ? 'Import Family'
                     : stagedFiles.length === 1
-                    ? 'Import Single Font'
-                    : `Import ${stagedFiles.length} Separate Fonts`}
+                    ? 'Import Font'
+                    : 'Import Fonts'}
                 </Button>
               </div>
             </div>

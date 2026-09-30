@@ -5,6 +5,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { ToastProvider } from '@/src/components/ui/Toast';
+import { ThemeProvider } from '@/src/lib/theme/ThemeContext';
 import { Landing } from '@/src/pages/Landing';
 import { Dashboard } from '@/src/pages/Dashboard';
 import { EditorPage } from '@/src/pages/EditorPage';
@@ -58,8 +59,10 @@ function Router() {
 
 export default function App() {
   return (
-    <ToastProvider>
-      <Router />
-    </ToastProvider>
+    <ThemeProvider>
+      <ToastProvider>
+        <Router />
+      </ToastProvider>
+    </ThemeProvider>
   );
 }

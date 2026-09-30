@@ -1,7 +1,12 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { FontProject } from '@/src/types/font';
 import { generateGlyphSvgPath } from '@/src/lib/fonts/fontConverter';
-import { X, RotateCcw } from 'lucide-react';
+import {
+  detectFontPrimaryLanguage,
+  getLanguageProofSampleText,
+  LANGUAGE_PROOF_PRESETS,
+} from '@/src/lib/fonts/languagePresets';
+import { X, RotateCcw, Languages } from 'lucide-react';
 import { Button } from '@/src/components/ui/Button';
 
 interface FontPreviewDrawerProps {
@@ -17,9 +22,21 @@ export const FontPreviewDrawer: React.FC<FontPreviewDrawerProps> = ({
 }) => {
   const [fontSize, setFontSize] = useState(48);
   const [spacing, setSpacing] = useState(0);
-  const [sampleText, setSampleText] = useState(
-    'Aa\n\nThe quick brown fox jumps\nover the lazy dog.\n\nABCDEFGHIJKLMNOPQRSTUVWXYZ\nabcdefghijklmnopqrstuvwxyz\n0123456789'
-  );
+
+  const langInfo = useMemo(() => {
+    return detectFontPrimaryLanguage(project.glyphs, project.primaryScript);
+  }, [project.glyphs, project.primaryScript]);
+
+  const activeScript = project.primaryScript || langInfo.primaryScript || langInfo.script;
+
+  const [sampleText, setSampleText] = useState(() => getLanguageProofSampleText(activeScript));
+
+  // Sync sample text whenever drawer opens or active font changes
+  useEffect(() => {
+    if (isOpen) {
+      setSampleText(getLanguageProofSampleText(activeScript));
+    }
+  }, [isOpen, project.id, activeScript]);
 
   if (!isOpen) return null;
 
@@ -48,6 +65,7 @@ export const FontPreviewDrawer: React.FC<FontPreviewDrawerProps> = ({
     }
 
     const glyphData = project.glyphs[char];
+    const glyphColor = glyphData?.color || glyphData?.contours?.find((c) => c.color)?.color || 'currentColor';
     if (!glyphData || !glyphData.contours || glyphData.contours.length === 0) {
       return (
         <span
@@ -57,6 +75,7 @@ export const FontPreviewDrawer: React.FC<FontPreviewDrawerProps> = ({
             height: `${charHeightPx}px`,
             display: 'inline-flex',
             alignItems: 'center',
+            color: glyphColor !== 'currentColor' ? glyphColor : undefined,
           }}
         >
           {char}
@@ -89,7 +108,7 @@ export const FontPreviewDrawer: React.FC<FontPreviewDrawerProps> = ({
           }}
         >
           <g transform={`translate(0, ${ascender}) scale(1, -1)`}>
-            <path d={d} fill="currentColor" fillRule="nonzero" />
+            <path d={d} fill={glyphColor} fillRule="nonzero" />
           </g>
         </svg>
       </span>
@@ -97,22 +116,27 @@ export const FontPreviewDrawer: React.FC<FontPreviewDrawerProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-xs select-none">
-      <div className="w-full max-w-4xl h-[85vh] bg-neutral-950 border border-neutral-800 flex flex-col text-neutral-100 shadow-2xl">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 dark:bg-black/80 backdrop-blur-xs select-none">
+      <div className="w-full max-w-4xl h-[85vh] bg-white dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800 flex flex-col text-neutral-900 dark:text-neutral-100 shadow-2xl rounded-lg overflow-hidden">
         {/* Top Header */}
-        <div className="h-12 border-b border-neutral-900 px-4 flex items-center justify-between">
+        <div className="h-12 border-b border-neutral-200 dark:border-neutral-900 px-4 flex items-center justify-between bg-neutral-50/80 dark:bg-neutral-950">
           <div className="flex items-center gap-3">
-            <span className="font-mono text-xs uppercase tracking-wider text-neutral-400 font-semibold">
+            <span className="font-mono text-xs uppercase tracking-wider text-neutral-500 dark:text-neutral-400 font-semibold">
               Font Proof
             </span>
-            <span className="text-neutral-700">·</span>
-            <span className="text-xs text-neutral-300 font-medium">
+            <span className="text-neutral-300 dark:text-neutral-700">·</span>
+            <span className="text-xs text-neutral-700 dark:text-neutral-300 font-medium">
               {project.family} {project.style}
             </span>
+            {activeScript && (
+              <span className="text-[10px] font-mono bg-amber-500/10 dark:bg-amber-950/60 border border-amber-500/30 dark:border-amber-800/60 text-amber-700 dark:text-amber-300 px-1.5 py-0.5 rounded-xs font-medium">
+                {activeScript}
+              </span>
+            )}
           </div>
 
-          {/* Minimal Controls matching prompt: Size 72, Spacing 0 */}
-          <div className="flex items-center gap-6 text-xs text-neutral-400">
+          {/* Controls: Size, Spacing */}
+          <div className="flex items-center gap-6 text-xs text-neutral-600 dark:text-neutral-400">
             <div className="flex items-center gap-2">
               <span className="text-[11px] font-mono">Size</span>
               <input
@@ -121,9 +145,9 @@ export const FontPreviewDrawer: React.FC<FontPreviewDrawerProps> = ({
                 max="144"
                 value={fontSize}
                 onChange={(e) => setFontSize(parseInt(e.target.value, 10))}
-                className="w-24 accent-neutral-100 cursor-pointer"
+                className="w-24 accent-sky-500 dark:accent-neutral-100 cursor-pointer"
               />
-              <span className="font-mono text-[11px] text-neutral-200 w-8">{fontSize}</span>
+              <span className="font-mono text-[11px] text-neutral-800 dark:text-neutral-200 w-8">{fontSize}</span>
             </div>
 
             <div className="flex items-center gap-2">
@@ -134,14 +158,14 @@ export const FontPreviewDrawer: React.FC<FontPreviewDrawerProps> = ({
                 max="24"
                 value={spacing}
                 onChange={(e) => setSpacing(parseInt(e.target.value, 10))}
-                className="w-20 accent-neutral-100 cursor-pointer"
+                className="w-20 accent-sky-500 dark:accent-neutral-100 cursor-pointer"
               />
-              <span className="font-mono text-[11px] text-neutral-200 w-6">{spacing}</span>
+              <span className="font-mono text-[11px] text-neutral-800 dark:text-neutral-200 w-6">{spacing}</span>
             </div>
 
             <button
               onClick={onClose}
-              className="p-1 text-neutral-500 hover:text-neutral-200 transition-colors"
+              className="p-1 text-neutral-400 hover:text-neutral-800 dark:text-neutral-500 dark:hover:text-neutral-200 transition-colors cursor-pointer"
               aria-label="Close Preview"
             >
               <X className="w-4 h-4" />
@@ -150,9 +174,9 @@ export const FontPreviewDrawer: React.FC<FontPreviewDrawerProps> = ({
         </div>
 
         {/* Preview Scrollable Stage */}
-        <div className="flex-1 p-8 overflow-y-auto select-text bg-neutral-950/60">
+        <div className="flex-1 p-8 overflow-y-auto select-text bg-neutral-50/40 dark:bg-neutral-950/60">
           <div
-            className="leading-relaxed text-neutral-100"
+            className="leading-relaxed text-neutral-900 dark:text-neutral-100"
             style={{ fontSize: `${fontSize}px` }}
           >
             {sampleText.split('\n').map((line, lineIdx) => (
@@ -175,28 +199,52 @@ export const FontPreviewDrawer: React.FC<FontPreviewDrawerProps> = ({
           </div>
         </div>
 
-        {/* Bottom editable sample input */}
-        <div className="p-3 border-t border-neutral-900 bg-neutral-900/40 flex items-center gap-3">
-          <span className="text-[11px] font-mono text-neutral-500 shrink-0">Test String:</span>
-          <input
-            type="text"
-            value={sampleText.replace(/\n+/g, ' ')}
-            onChange={(e) => setSampleText(e.target.value)}
-            className="flex-1 bg-neutral-900 border border-neutral-800 text-xs text-neutral-200 px-3 py-1 outline-none font-mono"
-            placeholder="Type custom text to preview glyphs..."
-          />
-          <Button
-            size="sm"
-            variant="ghost"
-            onClick={() =>
-              setSampleText(
-                'Aa\n\nThe quick brown fox jumps\nover the lazy dog.\n\nABCDEFGHIJKLMNOPQRSTUVWXYZ\nabcdefghijklmnopqrstuvwxyz\n0123456789'
-              )
-            }
-            title="Reset text"
-          >
-            <RotateCcw className="w-3.5 h-3.5" />
-          </Button>
+        {/* Bottom editable sample input and language presets */}
+        <div className="p-3 border-t border-neutral-200 dark:border-neutral-900 bg-neutral-100/60 dark:bg-neutral-900/40 flex flex-col gap-2">
+          <div className="flex items-center gap-2">
+            <span className="text-[11px] font-mono text-neutral-500 shrink-0">Presets:</span>
+            <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar py-0.5">
+              <button
+                type="button"
+                onClick={() => setSampleText(getLanguageProofSampleText(activeScript))}
+                className="px-2 py-0.5 text-[10px] font-mono rounded-xs border border-sky-500/30 bg-sky-500/10 text-sky-600 dark:text-sky-300 hover:bg-sky-500/20 transition-colors cursor-pointer"
+              >
+                {activeScript} Sample
+              </button>
+              {Object.entries(LANGUAGE_PROOF_PRESETS).map(([key, preset]) => {
+                if (preset.name === activeScript || key === activeScript) return null;
+                return (
+                  <button
+                    key={key}
+                    type="button"
+                    onClick={() => setSampleText(preset.sample)}
+                    className="px-2 py-0.5 text-[10px] font-mono rounded-xs border border-neutral-200 dark:border-neutral-800 text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-neutral-200 hover:bg-neutral-200/50 dark:hover:bg-neutral-800/50 transition-colors cursor-pointer shrink-0"
+                  >
+                    {preset.name}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          <div className="flex items-center gap-3">
+            <span className="text-[11px] font-mono text-neutral-500 shrink-0">Test String:</span>
+            <input
+              type="text"
+              value={sampleText.replace(/\n+/g, ' ')}
+              onChange={(e) => setSampleText(e.target.value)}
+              className="flex-1 bg-white dark:bg-neutral-900 border border-neutral-300 dark:border-neutral-800 text-xs text-neutral-900 dark:text-neutral-200 px-3 py-1.5 outline-none font-mono rounded-xs focus:border-sky-500"
+              placeholder="Type custom text to preview glyphs..."
+            />
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={() => setSampleText(getLanguageProofSampleText(activeScript))}
+              title={`Reset to ${activeScript} default proof sample`}
+            >
+              <RotateCcw className="w-3.5 h-3.5" />
+            </Button>
+          </div>
         </div>
       </div>
     </div>

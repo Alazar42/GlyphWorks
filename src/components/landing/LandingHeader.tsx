@@ -1,6 +1,7 @@
 import React from 'react';
 import { Button } from '@/src/components/ui/Button';
 import { ArrowRight, Sparkles } from 'lucide-react';
+import { ThemeToggle } from '@/src/components/ui/ThemeToggle';
 
 interface LandingHeaderProps {
   onStartCreating: () => void;
@@ -36,6 +37,8 @@ export const LandingHeader: React.FC<LandingHeaderProps> = ({
           >
             Features
           </button>
+
+          <ThemeToggle variant="icon" />
 
           <Button
             size="sm"

@@ -18,7 +18,7 @@ export const Select = React.forwardRef<HTMLSelectElement, SelectProps>(
     return (
       <div className="w-full space-y-1.5 text-left">
         {label && (
-          <label htmlFor={selectId} className="block text-xs font-medium text-neutral-400">
+          <label htmlFor={selectId} className="block text-xs font-medium text-neutral-600 dark:text-neutral-400">
             {label}
           </label>
         )}
@@ -26,13 +26,13 @@ export const Select = React.forwardRef<HTMLSelectElement, SelectProps>(
           <select
             id={selectId}
             ref={ref}
-            className={`w-full bg-neutral-900 border text-xs text-neutral-100 px-3 py-2 appearance-none transition-colors focus-visible:outline-none focus-visible:border-neutral-400 focus-visible:ring-1 focus-visible:ring-neutral-400 cursor-pointer ${
-              error ? 'border-rose-700' : 'border-neutral-800'
+            className={`w-full bg-white dark:bg-neutral-900 border text-xs text-neutral-900 dark:text-neutral-100 px-3 py-2 appearance-none transition-colors focus-visible:outline-none focus-visible:border-sky-500 dark:focus-visible:border-neutral-400 focus-visible:ring-1 focus-visible:ring-sky-500 dark:focus-visible:ring-neutral-400 cursor-pointer rounded-xs ${
+              error ? 'border-rose-600' : 'border-neutral-300 dark:border-neutral-800'
             } ${className}`}
             {...props}
           >
             {options.map((opt) => (
-              <option key={opt.value} value={opt.value} className="bg-neutral-900 text-neutral-100">
+              <option key={opt.value} value={opt.value} className="bg-white dark:bg-neutral-900 text-neutral-900 dark:text-neutral-100">
                 {opt.label}
               </option>
             ))}

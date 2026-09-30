@@ -1,4 +1,5 @@
 @import "tailwindcss";
+@custom-variant dark (&:where(.dark, .dark *));
 
 @theme {
   --font-sans: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
@@ -34,3 +35,111 @@ input, textarea, [contenteditable="true"], .selectable-text {
 ::-webkit-scrollbar-thumb:hover {
   background: rgba(255, 255, 255, 0.2);
 }
+
+/* Light Theme Mode Overrides */
+html.light {
+  color-scheme: light;
+}
+
+html.light body,
+html.light #root {
+  background-color: #f8fafc;
+  color: #0f172a;
+}
+
+html.light ::-webkit-scrollbar-thumb {
+  background: rgba(0, 0, 0, 0.15);
+}
+
+html.light ::-webkit-scrollbar-thumb:hover {
+  background: rgba(0, 0, 0, 0.3);
+}
+
+/* Backgrounds in light mode */
+html.light .bg-neutral-950,
+html.light [class*="bg-neutral-950/"] {
+  background-color: #ffffff !important;
+}
+
+html.light .bg-neutral-900,
+html.light [class*="bg-neutral-900/"] {
+  background-color: #f1f5f9 !important;
+}
+
+html.light .bg-neutral-850,
+html.light .bg-neutral-800,
+html.light [class*="bg-neutral-850/"],
+html.light [class*="bg-neutral-800/"] {
+  background-color: #e2e8f0 !important;
+}
+
+html.light [class*="bg-sky-950"] {
+  background-color: #e0f2fe !important;
+}
+
+/* Borders in light mode */
+html.light .border-neutral-900,
+html.light .border-neutral-850,
+html.light .border-neutral-800,
+html.light [class*="border-neutral-900"],
+html.light [class*="border-neutral-850"],
+html.light [class*="border-neutral-800"] {
+  border-color: #e2e8f0 !important;
+}
+
+html.light .border-neutral-700,
+html.light [class*="border-neutral-700"],
+html.light [class*="border-neutral-750"] {
+  border-color: #cbd5e1 !important;
+}
+
+html.light .border-neutral-600 {
+  border-color: #94a3b8 !important;
+}
+
+html.light [class*="border-sky-800"],
+html.light [class*="border-sky-600"] {
+  border-color: #7dd3fc !important;
+}
+
+/* Text colors in light mode */
+html.light .text-neutral-100 {
+  color: #0f172a !important;
+}
+
+html.light .text-neutral-200 {
+  color: #1e293b !important;
+}
+
+html.light .text-neutral-300 {
+  color: #334155 !important;
+}
+
+html.light .text-neutral-400 {
+  color: #475569 !important;
+}
+
+html.light .text-neutral-500 {
+  color: #64748b !important;
+}
+
+html.light .text-neutral-600 {
+  color: #94a3b8 !important;
+}
+
+html.light [class*="text-sky-200"],
+html.light [class*="text-sky-300"] {
+  color: #0369a1 !important;
+}
+
+html.light input,
+html.light select,
+html.light textarea {
+  color: #0f172a !important;
+}
+
+html.light input::placeholder,
+html.light textarea::placeholder {
+  color: #94a3b8 !important;
+}
+

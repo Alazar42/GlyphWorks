@@ -13,37 +13,37 @@ export const LandingCapabilities: React.FC = () => {
     {
       num: '01',
       title: 'VECTOR PRECISION',
-      desc: 'Illustrator-grade direct node & edge multi-selection. Drag edges and node clusters together with sub-pixel snap.',
+      desc: 'Direct node and edge multi-selection. Move points, edge segments, and bezier handles together with precision snapping.',
       icon: <MousePointer2 className="w-4 h-4 text-sky-400" />,
     },
     {
       num: '02',
-      title: 'GODOT 2D ZOOM',
-      desc: 'Focal mouse-anchored scroll zoom and Spacebar canvas pan. The point under your cursor stays 100% stationary.',
+      title: 'FLUID CANVAS',
+      desc: 'Focal cursor-anchored zoom and smooth canvas pan navigation. Inspect intricate curves and details effortlessly.',
       icon: <ZoomIn className="w-4 h-4 text-sky-400" />,
     },
     {
       num: '03',
-      title: 'FREE PEN BRUSH',
-      desc: 'Draw fluid outlines directly with the adjustable brush tool. Automatically compiles stroke paths into font contours.',
+      title: 'FREEHAND DRAWING',
+      desc: 'Draw fluid outlines directly with the adjustable brush tool. Automatically creates clean, lightweight vector contours.',
       icon: <Paintbrush className="w-4 h-4 text-sky-400" />,
     },
     {
       num: '04',
-      title: 'PERFORMANT ARCING',
-      desc: 'High-speed curvature tension sliders on the inspector and interactive canvas edge bowing with instant 60fps response.',
+      title: 'CURVATURE & BEZIER',
+      desc: 'Interactive curvature tension controls and cubic bezier handles for sculpting balanced typographic contours.',
       icon: <Spline className="w-4 h-4 text-sky-400" />,
     },
     {
       num: '05',
-      title: 'FAMILY INTELLIGENCE',
-      desc: 'Import dozens of font files together. Automatically detects family names, weights, and styles from filenames.',
+      title: 'FAMILY MANAGEMENT',
+      desc: 'Import and organize font families with automatic weight, width, and style detection across dozens of styles.',
       icon: <Layers className="w-4 h-4 text-sky-400" />,
     },
     {
       num: '06',
-      title: 'UNBOUNDED STORAGE',
-      desc: 'Powered by local IndexedDB. No 5MB browser storage limits, zero cloud latency, and 100% private offline storage.',
+      title: 'OFFLINE & PORTABLE',
+      desc: '100% private in-browser storage. Download and transfer your workspace across browsers anytime with .gworks files.',
       icon: <HardDrive className="w-4 h-4 text-sky-400" />,
     },
   ];
@@ -51,11 +51,11 @@ export const LandingCapabilities: React.FC = () => {
   return (
     <section id="features" className="py-20 border-t border-neutral-900 px-6 max-w-6xl mx-auto">
       <div className="mb-12">
-        <span className="text-[11px] font-mono tracking-widest uppercase text-sky-400 font-semibold">
-          Architecture & Capabilities
+        <span className="text-[11px] font-mono tracking-widest uppercase text-neutral-500 font-medium">
+          Capabilities
         </span>
         <h2 className="text-2xl sm:text-3xl font-semibold tracking-tight text-neutral-100 mt-2">
-          Engineered for serious type designers.
+          Everything you need to design typefaces.
         </h2>
       </div>
 

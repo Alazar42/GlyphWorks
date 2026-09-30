@@ -78,8 +78,28 @@ export const LandingHero: React.FC<LandingHeroProps> = ({
           });
         }
 
-        types.sort((a, b) => a.weight - b.weight);
-        const primaryType = types.find((t) => t.weight === 400 && !t.isItalic) || types[0];
+        const widthRank: Record<string, number> = {
+          UltraCondensed: 1,
+          ExtraCondensed: 2,
+          Condensed: 3,
+          SemiCondensed: 4,
+          Normal: 5,
+          SemiExpanded: 6,
+          Expanded: 7,
+          ExtraExpanded: 8,
+          UltraExpanded: 9,
+        };
+        types.sort((a, b) => {
+          const wa = widthRank[a.width] || 5;
+          const wb = widthRank[b.width] || 5;
+          if (wa !== wb) return wa - wb;
+          if (a.weight !== b.weight) return a.weight - b.weight;
+          return (a.isItalic ? 1 : 0) - (b.isItalic ? 1 : 0);
+        });
+        const primaryType =
+          types.find((t) => t.weight === 400 && !t.isItalic && t.width === 'Normal') ||
+          types.find((t) => t.weight === 400 && !t.isItalic) ||
+          types[0];
 
         const singleFamilyProject: FontProject = {
           id: 'fnt_' + Math.random().toString(36).substring(2, 9) + Date.now().toString(36),
@@ -152,19 +172,19 @@ export const LandingHero: React.FC<LandingHeroProps> = ({
 
   return (
     <section className="pt-14 pb-20 px-6 max-w-6xl mx-auto space-y-12">
-      {/* Top Value Headline */}
+      {/* Top Headline */}
       <div className="max-w-3xl space-y-5">
         <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-neutral-900 border border-neutral-800 text-[11px] font-mono text-neutral-400">
-          <span className="w-1.5 h-1.5 rounded-full bg-sky-400 animate-pulse"></span>
-          <span>Zero Sign-In · No 5MB Quotas · 100% Offline-First</span>
+          <span className="w-1.5 h-1.5 rounded-full bg-sky-400"></span>
+          <span>Modern Vector Font Studio</span>
         </div>
 
         <h1 className="text-4xl sm:text-5xl md:text-6xl font-semibold tracking-tight text-neutral-100 text-balance leading-[1.1]">
-          The Open Studio for Vector Typography.
+          Vector Type Design, Simplified.
         </h1>
 
         <p className="text-base sm:text-lg text-neutral-400 font-normal leading-relaxed text-balance max-w-2xl">
-          Craft, refine, and compile typefaces with Adobe Illustrator-grade node selection, Godot 2D viewport focal zoom, free pen drawing, performant arcing, and intelligent multi-file font family import.
+          Design, balance, and compile custom typefaces directly in your browser. From individual glyph contours to full multi-style font families, create and export production-ready fonts with ease.
         </p>
 
         {/* Action Buttons */}
@@ -184,7 +204,7 @@ export const LandingHero: React.FC<LandingHeroProps> = ({
             onClick={() => fileInputRef.current?.click()}
           >
             <Upload className="w-4 h-4 mr-2 text-neutral-400" />
-            Import Font or Family
+            Import Fonts
           </Button>
 
           <input
@@ -209,32 +229,9 @@ export const LandingHero: React.FC<LandingHeroProps> = ({
             variant="ghost"
             onClick={onLearnMore}
           >
-            Capabilities
+            Features
           </Button>
         </div>
-      </div>
-
-      {/* Hero Feature Pills */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
-        {[
-          { label: 'Free Pen Brush', sub: 'Adjustable size', icon: <Paintbrush className="w-3.5 h-3.5 text-sky-400" /> },
-          { label: 'Godot 2D Zoom', sub: 'Focal mouse zoom', icon: <ZoomIn className="w-3.5 h-3.5 text-sky-400" /> },
-          { label: 'Illustrator Nodes', sub: 'Multi-node & edge drag', icon: <MousePointer2 className="w-3.5 h-3.5 text-sky-400" /> },
-          { label: 'Performant Arcing', sub: 'Fast 60fps curvature', icon: <Spline className="w-3.5 h-3.5 text-sky-400" /> },
-          { label: 'Family Import', sub: 'Auto style detection', icon: <Layers className="w-3.5 h-3.5 text-sky-400" /> },
-          { label: 'Unlimited DB', sub: 'No 5MB storage caps', icon: <HardDrive className="w-3.5 h-3.5 text-sky-400" /> },
-        ].map((feat, idx) => (
-          <div
-            key={idx}
-            className="p-3 bg-neutral-900/40 border border-neutral-850 hover:border-neutral-700 transition-colors rounded-xs space-y-1"
-          >
-            <div className="flex items-center gap-1.5 text-xs font-semibold text-neutral-200">
-              {feat.icon}
-              <span>{feat.label}</span>
-            </div>
-            <p className="text-[10px] text-neutral-500 font-mono">{feat.sub}</p>
-          </div>
-        ))}
       </div>
 
       {/* Interactive Drag & Drop Zone + Live Type Playground */}
@@ -252,71 +249,49 @@ export const LandingHero: React.FC<LandingHeroProps> = ({
         }`}
       >
         {/* Dropzone Overlay Banner */}
-        <div className="px-5 py-2.5 bg-neutral-900/80 border-b border-neutral-800/80 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
+        <div className="px-5 py-2.5 bg-neutral-900/60 border-b border-neutral-800/80 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
           <div className="flex items-center gap-2 text-neutral-300">
             <Upload className="w-4 h-4 text-sky-400" />
-            <span className="font-medium">Instant Dropzone:</span>
-            <span className="text-neutral-400 text-[11px]">
-              Drag & drop any font file or entire font family (.ttf, .otf, .woff) right here to open
+            <span className="font-medium text-neutral-200">Drag & drop fonts:</span>
+            <span className="text-neutral-500 text-[11px]">
+              Drop any font file (.ttf, .otf, .woff) or entire font family to open immediately
             </span>
           </div>
 
           <div className="flex items-center gap-3 text-[11px] font-mono text-neutral-400">
             <span>Tracking: {previewTracking}px</span>
             <span>Weight: {previewWeight}</span>
-            <button
-              onClick={() => setShowWireframe(!showWireframe)}
-              className={`px-2 py-0.5 rounded-xs transition-colors cursor-pointer ${
-                showWireframe ? 'bg-sky-400/20 text-sky-300 border border-sky-400/40' : 'bg-neutral-800 text-neutral-400'
-              }`}
-            >
-              Wireframe: {showWireframe ? 'ON' : 'OFF'}
-            </button>
           </div>
         </div>
 
-        {/* Live Interactive Text & Contour Stage */}
-        <div className="p-8 sm:p-12 relative overflow-hidden bg-neutral-950 min-h-[220px] flex flex-col justify-center">
-          {/* Subtle guide background */}
+        {/* Live Interactive Text Stage */}
+        <div className="p-8 sm:p-12 relative overflow-hidden bg-neutral-950 min-h-[180px] flex flex-col justify-center">
           <div
-            className="absolute inset-0 opacity-[0.05] pointer-events-none"
+            className="absolute inset-0 opacity-[0.04] pointer-events-none"
             style={{
               backgroundImage: 'linear-gradient(to right, #ffffff 1px, transparent 1px), linear-gradient(to bottom, #ffffff 1px, transparent 1px)',
               backgroundSize: '32px 32px',
             }}
           />
 
-          <div className="relative z-10 space-y-4">
+          <div className="relative z-10">
             <input
               type="text"
               value={previewText}
               onChange={(e) => setPreviewText(e.target.value)}
-              className="w-full bg-transparent text-3xl sm:text-4xl md:text-5xl font-sans tracking-tight text-neutral-100 outline-none border-b border-transparent hover:border-neutral-800 focus:border-neutral-700 transition-colors"
+              className="w-full bg-transparent text-3xl sm:text-4xl md:text-5xl font-sans tracking-tight text-neutral-100 outline-none border-b border-transparent hover:border-neutral-850 focus:border-neutral-700 transition-colors"
               style={{
                 fontWeight: previewWeight,
                 letterSpacing: `${previewTracking}px`,
               }}
               title="Click to edit preview string"
             />
-
-            {/* Wireframe vector point simulation overlay */}
-            {showWireframe && (
-              <div className="flex items-center gap-2 pt-2 text-[10px] font-mono text-neutral-500">
-                <span className="w-2 h-2 rounded-xs bg-sky-400 inline-block"></span>
-                <span>On-curve anchor nodes</span>
-                <span className="w-px h-3 bg-neutral-800 mx-1"></span>
-                <span className="w-2 h-2 rounded-full border border-neutral-400 inline-block"></span>
-                <span>Bezier control handles</span>
-                <span className="w-px h-3 bg-neutral-800 mx-1"></span>
-                <span className="text-neutral-400">Baseline (0) · Cap-Height (700) · Ascender (800)</span>
-              </div>
-            )}
           </div>
         </div>
 
         {/* Interactive Controls Bar */}
-        <div className="p-3 bg-neutral-900/50 border-t border-neutral-900 flex flex-wrap items-center justify-between gap-4 text-xs">
-          <div className="flex items-center gap-4">
+        <div className="p-3 bg-neutral-900/40 border-t border-neutral-900 flex flex-wrap items-center justify-between gap-4 text-xs">
+          <div className="flex items-center gap-5">
             <div className="flex items-center gap-2">
               <span className="text-[11px] font-mono text-neutral-500">Weight</span>
               <input
@@ -328,6 +303,7 @@ export const LandingHero: React.FC<LandingHeroProps> = ({
                 onChange={(e) => setPreviewWeight(parseInt(e.target.value, 10))}
                 className="w-24 accent-sky-400 cursor-pointer"
               />
+              <span className="text-[11px] font-mono text-neutral-400 w-8">{previewWeight}</span>
             </div>
 
             <div className="flex items-center gap-2">
@@ -340,6 +316,7 @@ export const LandingHero: React.FC<LandingHeroProps> = ({
                 onChange={(e) => setPreviewTracking(parseInt(e.target.value, 10))}
                 className="w-20 accent-sky-400 cursor-pointer"
               />
+              <span className="text-[11px] font-mono text-neutral-400 w-6">{previewTracking}</span>
             </div>
           </div>
 
@@ -355,11 +332,11 @@ export const LandingHero: React.FC<LandingHeroProps> = ({
       <div className="pt-6">
         <div className="mb-4 flex items-center justify-between">
           <div className="space-y-1">
-            <span className="text-[11px] font-mono uppercase tracking-widest text-sky-400 font-semibold">
-              Live Workspace Architecture
+            <span className="text-[11px] font-mono uppercase tracking-widest text-neutral-500 font-medium">
+              Interactive Workspace
             </span>
             <h3 className="text-xl font-semibold text-neutral-100">
-              Complete Illustrator-style vector studio
+              Modern vector typography editor
             </h3>
           </div>
         </div>

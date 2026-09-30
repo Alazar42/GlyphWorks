@@ -52,7 +52,7 @@ export const EditorToolbar: React.FC<EditorToolbarProps> = ({
   ];
 
   return (
-    <aside className="w-12 border-r border-neutral-900 bg-neutral-950 flex flex-col items-center py-2.5 justify-between shrink-0 select-none z-20">
+    <aside className="w-12 border-r border-neutral-200 dark:border-neutral-900 bg-white dark:bg-neutral-950 flex flex-col items-center py-2.5 justify-between shrink-0 select-none z-20 shadow-xs">
       {/* Primary Drawing Tools */}
       <div className="flex flex-col items-center gap-1.5 w-full">
         {tools.map((t) => {
@@ -63,8 +63,8 @@ export const EditorToolbar: React.FC<EditorToolbarProps> = ({
                 onClick={() => onSelectTool(t.id)}
                 className={`w-8 h-8 flex items-center justify-center transition-colors cursor-pointer rounded-xs ${
                   isActive
-                    ? 'bg-neutral-800 text-neutral-100 shadow-sm border border-neutral-700/60'
-                    : 'text-neutral-400 hover:text-neutral-100 hover:bg-neutral-900'
+                    ? 'bg-sky-100 text-sky-800 border border-sky-300 shadow-xs dark:bg-neutral-800 dark:text-neutral-100 dark:border-neutral-700/60'
+                    : 'text-neutral-500 hover:text-neutral-950 hover:bg-neutral-100 dark:text-neutral-400 dark:hover:text-neutral-100 dark:hover:bg-neutral-900'
                 }`}
                 aria-label={t.label}
               >
@@ -76,8 +76,8 @@ export const EditorToolbar: React.FC<EditorToolbarProps> = ({
 
         {/* Brush Size Quick Adjust when Brush is active */}
         {activeTool === 'brush' && (
-          <div className="mt-2 pt-2 border-t border-neutral-900 flex flex-col items-center gap-1 w-full px-1">
-            <span className="text-[9px] font-mono text-neutral-400 uppercase tracking-tighter">Size</span>
+          <div className="mt-2 pt-2 border-t border-neutral-200 dark:border-neutral-900 flex flex-col items-center gap-1 w-full px-1">
+            <span className="text-[9px] font-mono text-neutral-500 dark:text-neutral-400 uppercase tracking-tighter">Size</span>
             <input
               type="range"
               min="4"
@@ -85,21 +85,21 @@ export const EditorToolbar: React.FC<EditorToolbarProps> = ({
               step="2"
               value={brushSize}
               onChange={(e) => onChangeBrushSize(parseInt(e.target.value, 10))}
-              className="w-10 accent-neutral-100 cursor-pointer"
+              className="w-10 accent-neutral-800 dark:accent-neutral-100 cursor-pointer"
               title={`Brush Size: ${brushSize}px`}
             />
-            <span className="text-[9px] font-mono text-neutral-300 font-semibold">{brushSize}px</span>
+            <span className="text-[9px] font-mono text-neutral-700 dark:text-neutral-300 font-semibold">{brushSize}px</span>
           </div>
         )}
       </div>
 
       {/* Action Buttons at bottom */}
-      <div className="flex flex-col items-center gap-1.5 w-full pt-2.5 border-t border-neutral-900">
+      <div className="flex flex-col items-center gap-1.5 w-full pt-2.5 border-t border-neutral-200 dark:border-neutral-900">
         <Tooltip content="Delete Selected Nodes" shortcut="Del" side="right">
           <button
             onClick={onDeleteSelectedPoints}
             disabled={!hasSelectedPoints}
-            className="w-8 h-8 flex items-center justify-center text-neutral-500 hover:text-rose-400 disabled:opacity-20 disabled:pointer-events-none transition-colors rounded-xs"
+            className="w-8 h-8 flex items-center justify-center text-neutral-400 hover:text-rose-500 hover:bg-rose-50 dark:hover:bg-neutral-900 disabled:opacity-20 disabled:pointer-events-none transition-colors rounded-xs"
             aria-label="Delete selected points"
           >
             <Trash2 className="w-4 h-4" />
@@ -109,7 +109,7 @@ export const EditorToolbar: React.FC<EditorToolbarProps> = ({
         <Tooltip content="Reset to Geometric Template" side="right">
           <button
             onClick={onResetGlyphTemplate}
-            className="w-8 h-8 flex items-center justify-center text-neutral-500 hover:text-neutral-200 transition-colors rounded-xs"
+            className="w-8 h-8 flex items-center justify-center text-neutral-400 hover:text-neutral-900 hover:bg-neutral-100 dark:text-neutral-500 dark:hover:text-neutral-200 dark:hover:bg-neutral-900 transition-colors rounded-xs"
             aria-label="Reset glyph outline"
           >
             <RotateCcw className="w-4 h-4" />
@@ -119,7 +119,7 @@ export const EditorToolbar: React.FC<EditorToolbarProps> = ({
         <Tooltip content="Clear Glyph Outline" side="right">
           <button
             onClick={onClearGlyph}
-            className="w-8 h-8 flex items-center justify-center text-neutral-500 hover:text-rose-400 transition-colors rounded-xs"
+            className="w-8 h-8 flex items-center justify-center text-neutral-400 hover:text-rose-500 hover:bg-rose-50 dark:hover:bg-neutral-900 transition-colors rounded-xs"
             aria-label="Clear glyph"
           >
             <Sparkles className="w-4 h-4" />

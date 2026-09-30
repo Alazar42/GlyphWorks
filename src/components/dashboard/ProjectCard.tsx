@@ -3,6 +3,7 @@ import { FontProject } from '@/src/types/font';
 import { MoreHorizontal, Trash2, Copy, Edit3, Download, Layers } from 'lucide-react';
 import { Dropdown } from '@/src/components/ui/Dropdown';
 import { generateGlyphSvgPath } from '@/src/lib/fonts/fontConverter';
+import { detectFontPrimaryLanguage } from '@/src/lib/fonts/languagePresets';
 
 interface ProjectCardProps {
   project: FontProject;
@@ -37,20 +38,34 @@ export const ProjectCard: React.FC<ProjectCardProps> = ({
     }
   };
 
-  // Real font vector paths for 'A' and 'a'
-  const glyphA = project.glyphs['A'];
-  const glyphSmallA = project.glyphs['a'];
-  const pathA = generateGlyphSvgPath(glyphA);
-  const pathSmallA = generateGlyphSvgPath(glyphSmallA);
+  // Language & showcase character detection
+  const langInfo = React.useMemo(() => {
+    return detectFontPrimaryLanguage(project.glyphs, project.primaryScript);
+  }, [project.glyphs, project.primaryScript]);
 
-  const hasRealGlyphAa = pathA.length > 0 || pathSmallA.length > 0;
+  const isColor = Boolean(project.isColorFont || langInfo.isColorFont);
+  const primaryScript = project.primaryScript || langInfo.primaryScript || langInfo.script;
+
+  // Real font vector paths for detected showcase glyphs (e.g. 永, 和 for Chinese, ሀ, ለ for Ethiopic, Aa for Latin)
+  const isNonLatin = primaryScript && primaryScript !== 'Latin';
+  const showcase = langInfo.showcaseGlyphs.length > 0
+    ? langInfo.showcaseGlyphs
+    : (isNonLatin ? [] : [project.glyphs['A'], project.glyphs['a']].filter(Boolean));
+
+  const glyph1 = showcase[0];
+  const glyph2 = showcase[1];
+  const path1 = glyph1 ? generateGlyphSvgPath(glyph1) : '';
+  const path2 = glyph2 ? generateGlyphSvgPath(glyph2) : '';
+
+  const hasRealGlyph = path1.length > 0 || path2.length > 0;
+  const hasPath2 = Boolean(path2 && path2.length > 0);
   const ascender = project.metrics?.ascender || 800;
   const descender = project.metrics?.descender || -200;
-  const totalH = ascender - descender;
-  const advA = glyphA?.advanceWidth || 600;
-  const advSmallA = glyphSmallA?.advanceWidth || 500;
+  const totalH = Math.max(ascender - descender, 600);
+  const adv1 = glyph1?.advanceWidth || 600;
+  const adv2 = glyph2?.advanceWidth || 500;
   const spacingBetween = Math.round((project.metrics?.unitsPerEm || 1000) * 0.05);
-  const totalWidth = advA + spacingBetween + advSmallA;
+  const totalWidth = hasPath2 ? adv1 + spacingBetween + adv2 : adv1;
 
   return (
     <div
@@ -60,23 +75,33 @@ export const ProjectCard: React.FC<ProjectCardProps> = ({
       {/* Top Preview Glyphs using the real font's curves */}
       <div className="flex items-start justify-between">
         <div className="h-14 flex items-center text-neutral-300 group-hover:text-white transition-colors">
-          {hasRealGlyphAa ? (
+          {hasRealGlyph ? (
             <svg
               viewBox={`0 0 ${totalWidth} ${totalH}`}
               className="h-11 w-auto max-w-[140px] overflow-visible"
             >
               <g transform={`translate(0, ${ascender}) scale(1, -1)`}>
-                {pathA && <path d={pathA} fill="currentColor" fillRule="nonzero" />}
-                {pathSmallA && (
-                  <g transform={`translate(${advA + spacingBetween}, 0)`}>
-                    <path d={pathSmallA} fill="currentColor" fillRule="nonzero" />
+                {path1 && (
+                  <path
+                    d={path1}
+                    fill={glyph1?.color || (isColor ? '#38bdf8' : 'currentColor')}
+                    fillRule="nonzero"
+                  />
+                )}
+                {hasPath2 && (
+                  <g transform={`translate(${adv1 + spacingBetween}, 0)`}>
+                    <path
+                      d={path2}
+                      fill={glyph2?.color || (isColor ? '#ec4899' : 'currentColor')}
+                      fillRule="nonzero"
+                    />
                   </g>
                 )}
               </g>
             </svg>
           ) : (
             <span className="font-sans text-3xl font-light tracking-tight">
-              Aa
+              {langInfo.sampleChars || (isNonLatin ? '' : 'Aa')}
             </span>
           )}
         </div>
@@ -138,8 +163,20 @@ export const ProjectCard: React.FC<ProjectCardProps> = ({
               [{typeCount} types]
             </span>
           ) : (
-            <span className="text-[10px] font-mono text-neutral-500 bg-neutral-900 border border-neutral-800 px-1.5 py-0.2 rounded-xs">
+            <span className="text-[10px] font-mono text-neutral-400 bg-neutral-900 border border-neutral-800 px-1.5 py-0.2 rounded-xs">
               {project.style}
+            </span>
+          )}
+
+          {primaryScript && primaryScript !== 'Latin' && (
+            <span className="text-[10px] font-mono bg-amber-950/60 border border-amber-800/60 text-amber-300 px-1.5 py-0.2 rounded-xs">
+              {primaryScript}
+            </span>
+          )}
+
+          {isColor && (
+            <span className="text-[10px] font-mono bg-purple-950/60 border border-purple-800/60 text-purple-300 px-1.5 py-0.2 rounded-xs">
+              Color
             </span>
           )}
         </div>

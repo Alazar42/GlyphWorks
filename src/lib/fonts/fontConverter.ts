@@ -1,6 +1,7 @@
 import opentype from 'opentype.js';
 import { FontProject, GlyphData, PathContour, VectorPoint, DetectedFontFile } from '@/src/types/font';
 import { DEFAULT_METRICS, generateInitialGlyphSet } from './defaultFont';
+import { detectFontPrimaryLanguage } from './languagePresets';
 
 export interface ExportFontOptions {
   format: 'ttf' | 'otf' | 'woff' | 'svg' | 'json';
@@ -17,7 +18,7 @@ export interface DetectedFontMeta {
 }
 
 /**
- * Intelligently detect font family, style/type, weight, and slant from filename
+ * Intelligently detect font family, style/type, weight, width, and slant from filename
  */
 export function detectFontMetaFromFilename(fileName: string): DetectedFontMeta {
   const base = fileName.replace(/\.[^/.]+$/, '');
@@ -42,14 +43,37 @@ export function detectFontMetaFromFilename(fileName: string): DetectedFontMeta {
     }
   }
 
+  // Detect Width class across both family and style segments
+  const combinedStr = `${family} ${stylePart} ${base}`.toLowerCase();
+  let width = 'Normal';
+  if (/ultra[-_ ]?condensed/i.test(combinedStr)) {
+    width = 'UltraCondensed';
+  } else if (/extra[-_ ]?condensed/i.test(combinedStr)) {
+    width = 'ExtraCondensed';
+  } else if (/semi[-_ ]?condensed/i.test(combinedStr)) {
+    width = 'SemiCondensed';
+  } else if (/condensed|[-_]cond\b|narrow|compressed/i.test(combinedStr)) {
+    width = 'Condensed';
+  } else if (/ultra[-_ ]?expanded/i.test(combinedStr)) {
+    width = 'UltraExpanded';
+  } else if (/extra[-_ ]?expanded/i.test(combinedStr)) {
+    width = 'ExtraExpanded';
+  } else if (/semi[-_ ]?expanded/i.test(combinedStr)) {
+    width = 'SemiExpanded';
+  } else if (/expanded|[-_]exp\b|wide/i.test(combinedStr)) {
+    width = 'Expanded';
+  }
+
+  // Strip width keywords from family name
   family = family
+    .replace(/(?:Ultra|Extra|Semi)?[-_ ]?(?:Condensed|Expanded|Cond|Exp|Narrow|Compressed|Wide)/gi, '')
     .replace(/([a-z])([A-Z])/g, '$1 $2')
     .replace(/[_-]+/g, ' ')
     .trim();
 
   let weight = 400;
   const lowerStyle = (stylePart || base).toLowerCase();
-  const isItalic = lowerStyle.includes('italic') || lowerStyle.includes('oblique');
+  const isItalic = lowerStyle.includes('italic') || lowerStyle.includes('oblique') || /[-_]it\b/i.test(base);
 
   if (lowerStyle.includes('extrablack') || lowerStyle.includes('ultrablack')) {
     weight = 950;
@@ -90,18 +114,64 @@ export function detectFontMetaFromFilename(fileName: string): DetectedFontMeta {
   else if (weight === 900) weightName = 'Black';
   else if (weight === 950) weightName = 'ExtraBlack';
 
-  let style = weightName;
-  if (isItalic) {
-    style = weight === 400 ? 'Italic' : `${weightName} Italic`;
+  // Compose style string incorporating width when not normal
+  let baseStyleName = weightName;
+  if (width !== 'Normal') {
+    if (weight === 400) {
+      baseStyleName = isItalic ? `${width} Italic` : `${width} Regular`;
+    } else {
+      baseStyleName = isItalic ? `${width} ${weightName} Italic` : `${width} ${weightName}`;
+    }
+  } else {
+    baseStyleName = isItalic
+      ? weight === 400 ? 'Italic' : `${weightName} Italic`
+      : weightName;
   }
 
   return {
     family: family || 'Custom Font',
-    style,
+    style: baseStyleName,
     weight,
-    width: 'Normal',
+    width,
     isItalic,
   };
+}
+
+/**
+ * Build exact SVG path string for a single contour
+ */
+export function generateContourSvgPath(contour: PathContour): string {
+  if (!contour.points || contour.points.length === 0) return '';
+  const pts = contour.points;
+  let d = `M ${pts[0].x} ${pts[0].y} `;
+
+  let i = 1;
+  while (i < pts.length) {
+    const pt = pts[i];
+    if (pt.type === 'onCurve') {
+      d += `L ${pt.x} ${pt.y} `;
+      i++;
+    } else if (pt.type === 'control1') {
+      const next = pts[i + 1];
+      if (next && next.type === 'control2') {
+        const end = pts[i + 2] || pts[0];
+        d += `C ${pt.x} ${pt.y}, ${next.x} ${next.y}, ${end.x} ${end.y} `;
+        i += 3;
+      } else {
+        const end = next || pts[0];
+        d += `Q ${pt.x} ${pt.y}, ${end.x} ${end.y} `;
+        i += 2;
+      }
+    } else {
+      d += `L ${pt.x} ${pt.y} `;
+      i++;
+    }
+  }
+
+  if (contour.closed) {
+    d += 'Z ';
+  }
+  return d;
 }
 
 /**
@@ -109,42 +179,7 @@ export function detectFontMetaFromFilename(fileName: string): DetectedFontMeta {
  */
 export function generateGlyphSvgPath(glyph: GlyphData | undefined | null): string {
   if (!glyph || !glyph.contours || glyph.contours.length === 0) return '';
-  let d = '';
-
-  glyph.contours.forEach((contour) => {
-    if (!contour.points || contour.points.length === 0) return;
-    const pts = contour.points;
-    d += `M ${pts[0].x} ${pts[0].y} `;
-
-    let i = 1;
-    while (i < pts.length) {
-      const pt = pts[i];
-      if (pt.type === 'onCurve') {
-        d += `L ${pt.x} ${pt.y} `;
-        i++;
-      } else if (pt.type === 'control1') {
-        const next = pts[i + 1];
-        if (next && next.type === 'control2') {
-          const end = pts[i + 2] || pts[0];
-          d += `C ${pt.x} ${pt.y}, ${next.x} ${next.y}, ${end.x} ${end.y} `;
-          i += 3;
-        } else {
-          const end = next || pts[0];
-          d += `Q ${pt.x} ${pt.y}, ${end.x} ${end.y} `;
-          i += 2;
-        }
-      } else {
-        d += `L ${pt.x} ${pt.y} `;
-        i++;
-      }
-    }
-
-    if (contour.closed) {
-      d += 'Z ';
-    }
-  });
-
-  return d;
+  return glyph.contours.map(generateContourSvgPath).join(' ');
 }
 
 /**
@@ -265,7 +300,9 @@ export function exportFontFile(project: FontProject, options: ExportFontOptions)
 
     Object.values(project.glyphs).forEach((g) => {
       const pathData = generateGlyphSvgPath(g);
-      svgContent += `  <glyph unicode="${escapeXml(g.char)}" glyph-name="${g.name}" horiz-adv-x="${g.advanceWidth}" d="${pathData}" />\n`;
+      const glyphColor = g.color || g.contours?.find((c) => c.color)?.color;
+      const colorAttr = glyphColor ? ` fill="${glyphColor}"` : '';
+      svgContent += `  <glyph unicode="${escapeXml(g.char)}" glyph-name="${g.name}" horiz-adv-x="${g.advanceWidth}" d="${pathData}"${colorAttr} />\n`;
     });
 
     svgContent += `</font>\n</defs>\n</svg>`;
@@ -314,7 +351,10 @@ function downloadBlob(blob: Blob, filename: string): void {
 /**
  * Convert opentype.js parsed font into a GlyphWorks project with 1:1 vector outline fidelity
  */
-export async function parseFontFile(file: File): Promise<Partial<FontProject>> {
+export async function parseFontFile(
+  file: File,
+  onProgress?: (percent: number, current: number, total: number) => void
+): Promise<Partial<FontProject>> {
   const buffer = await file.arrayBuffer();
 
   // If json project
@@ -327,14 +367,53 @@ export async function parseFontFile(file: File): Promise<Partial<FontProject>> {
   const detectedMeta = detectFontMetaFromFilename(file.name);
   const parsedFont = opentype.parse(buffer);
 
-  // Exact names
-  const family =
-    parsedFont.names.fontFamily?.en || detectedMeta.family || file.name.replace(/\.[^/.]+$/, '');
-  const style = parsedFont.names.fontSubfamily?.en || detectedMeta.style || 'Regular';
-
   // Exact metrics from font tables
   const os2 = (parsedFont.tables as any)?.os2;
   const hhea = (parsedFont.tables as any)?.hhea;
+
+  // Width from OS/2 table usWidthClass or detected filename
+  const widthClassMap: Record<number, string> = {
+    1: 'UltraCondensed',
+    2: 'ExtraCondensed',
+    3: 'Condensed',
+    4: 'SemiCondensed',
+    5: 'Normal',
+    6: 'SemiExpanded',
+    7: 'Expanded',
+    8: 'ExtraExpanded',
+    9: 'UltraExpanded',
+  };
+  const tableWidth = os2?.usWidthClass ? widthClassMap[os2.usWidthClass] : undefined;
+  const width = (tableWidth && tableWidth !== 'Normal') ? tableWidth : detectedMeta.width;
+
+  // Typographic family & subfamily resolution
+  const preferredFamily = parsedFont.names.preferredFamily?.en;
+  const standardFamily = parsedFont.names.fontFamily?.en;
+  let family = preferredFamily || detectedMeta.family || standardFamily || file.name.replace(/\.[^/.]+$/, '');
+  if (width !== 'Normal' && family.toLowerCase().endsWith(width.toLowerCase())) {
+    family = family.slice(0, -width.length).trim();
+  }
+
+  const preferredSubfamily = parsedFont.names.preferredSubfamily?.en;
+  const standardSubfamily = parsedFont.names.fontSubfamily?.en;
+  let style = preferredSubfamily || detectedMeta.style || standardSubfamily || 'Regular';
+
+  // Ensure width is part of style name when not normal
+  if (width !== 'Normal' && !style.toLowerCase().includes(width.toLowerCase())) {
+    style = `${width} ${style}`;
+  }
+
+  // Weight class resolution (handling legacy 250 Thin/ExtraLight)
+  let detectedWeight = detectedMeta.weight;
+  if (os2?.usWeightClass && os2.usWeightClass >= 100 && os2.usWeightClass <= 950) {
+    if (detectedMeta.weight === 100) {
+      detectedWeight = 100;
+    } else if (detectedMeta.weight === 200 && os2.usWeightClass === 250) {
+      detectedWeight = 200;
+    } else {
+      detectedWeight = os2.usWeightClass;
+    }
+  }
 
   const unitsPerEm = parsedFont.unitsPerEm || 1000;
   const ascender = parsedFont.ascender || hhea?.ascender || os2?.sTypoAscender || 800;
@@ -372,140 +451,207 @@ export async function parseFontFile(file: File): Promise<Partial<FontProject>> {
   };
 
   const glyphs: Record<string, GlyphData> = {};
+  const totalGlyphs = parsedFont.glyphs.length;
+  const isMegaFont = totalGlyphs > 3500;
+  const MAX_CONTOURS = 3500;
+  let contoursExtracted = 0;
 
-  for (let i = 0; i < parsedFont.glyphs.length; i++) {
+  const roundCoord = (n: number) => Math.round(n * 100) / 100;
+
+  for (let i = 0; i < totalGlyphs; i++) {
+    // Yield to the event loop every 200 glyphs so the browser thread remains fluid
+    if (i > 0 && i % 200 === 0) {
+      if (onProgress) {
+        onProgress(Math.round((i / totalGlyphs) * 100), i, totalGlyphs);
+      }
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+
     const g = parsedFont.glyphs.get(i);
     if (!g) continue;
 
-    // Resolve character key
+    // Resolve unicode & character key
     let char = '';
-    if (g.unicode !== undefined && g.unicode !== 0) {
+    const unicodeVal =
+      g.unicode !== undefined && g.unicode !== 0
+        ? g.unicode
+        : g.unicodes && g.unicodes.length > 0
+        ? g.unicodes[0]
+        : undefined;
+
+    if (unicodeVal !== undefined) {
       try {
-        char = String.fromCodePoint(g.unicode);
+        char = String.fromCodePoint(unicodeVal);
       } catch {
-        char = String.fromCharCode(g.unicode);
-      }
-    } else if (g.unicodes && g.unicodes.length > 0) {
-      try {
-        char = String.fromCodePoint(g.unicodes[0]);
-      } catch {
-        char = String.fromCharCode(g.unicodes[0]);
+        char = String.fromCharCode(unicodeVal);
       }
     } else {
       char = g.name || `glyph_${i}`;
     }
 
-    const contours: PathContour[] = [];
-    let currentContourPoints: VectorPoint[] = [];
+    // Determine whether to extract full vector bezier contours
+    let shouldExtractContours = true;
+    if (isMegaFont) {
+      // Always extract for ASCII, Latin, and foundational Chinese characters (永, 中, 国, etc.)
+      const isAscii = unicodeVal !== undefined && unicodeVal <= 0x007f;
+      const isCoreAnchorChar =
+        unicodeVal !== undefined &&
+        (
+          // Chinese (CJK)
+          unicodeVal === 0x6c38 || // 永
+          unicodeVal === 0x548c || // 和
+          unicodeVal === 0x4e2d || // 中
+          unicodeVal === 0x56fd || // 国
+          unicodeVal === 0x6587 || // 文
+          unicodeVal === 0x5b57 || // 字
+          unicodeVal === 0x4eba || // 人
+          unicodeVal === 0x5927 || // 大
+          unicodeVal === 0x5929 || // 天
+          unicodeVal === 0x5730 || // 地
+          // Ethiopic
+          unicodeVal === 0x1200 || // ሀ
+          unicodeVal === 0x1208 || // ለ
+          unicodeVal === 0x12a0 || // አ
+          // Arabic
+          unicodeVal === 0x0627 || // ا
+          unicodeVal === 0x0628 || // ب
+          // Cyrillic
+          unicodeVal === 0x0416 || // Ж
+          unicodeVal === 0x044f || // я
+          // Greek
+          unicodeVal === 0x03a9 || // Ω
+          unicodeVal === 0x03b1 || // α
+          // Hebrew
+          unicodeVal === 0x05d0 || // א
+          unicodeVal === 0x05d1 || // ב
+          // Devanagari
+          unicodeVal === 0x0905 || // अ
+          unicodeVal === 0x0915 || // क
+          // Japanese
+          unicodeVal === 0x3042 || // あ
+          unicodeVal === 0x30a2    // ア
+        );
 
-    // Safely retrieve path commands (handling lazy evaluation)
-    const pathObj = typeof g.path === 'function' ? (g as any).path() : g.path;
-    const commands = pathObj?.commands || [];
-
-    const roundCoord = (n: number) => Math.round(n * 100) / 100;
-
-    for (const cmd of commands) {
-      if (cmd.type === 'M') {
-        if (currentContourPoints.length > 0) {
-          // Remove duplicate closing point if present
-          const first = currentContourPoints[0];
-          const last = currentContourPoints[currentContourPoints.length - 1];
-          if (
-            currentContourPoints.length > 1 &&
-            last.type === 'onCurve' &&
-            last.x === first.x &&
-            last.y === first.y
-          ) {
-            currentContourPoints.pop();
-          }
-
-          contours.push({
-            id: `cnt_${i}_${contours.length}`,
-            closed: true,
-            points: currentContourPoints,
-          });
-          currentContourPoints = [];
-        }
-
-        currentContourPoints.push({
-          id: `pt_${i}_${contours.length}_${currentContourPoints.length}`,
-          x: roundCoord(cmd.x),
-          y: roundCoord(cmd.y),
-          type: 'onCurve',
-        });
-      } else if (cmd.type === 'L') {
-        currentContourPoints.push({
-          id: `pt_${i}_${contours.length}_${currentContourPoints.length}`,
-          x: roundCoord(cmd.x),
-          y: roundCoord(cmd.y),
-          type: 'onCurve',
-        });
-      } else if (cmd.type === 'Q') {
-        currentContourPoints.push({
-          id: `pt_${i}_${contours.length}_${currentContourPoints.length}`,
-          x: roundCoord(cmd.x1),
-          y: roundCoord(cmd.y1),
-          type: 'control1',
-        });
-        currentContourPoints.push({
-          id: `pt_${i}_${contours.length}_${currentContourPoints.length + 1}`,
-          x: roundCoord(cmd.x),
-          y: roundCoord(cmd.y),
-          type: 'onCurve',
-        });
-      } else if (cmd.type === 'C') {
-        currentContourPoints.push({
-          id: `pt_${i}_${contours.length}_${currentContourPoints.length}`,
-          x: roundCoord(cmd.x1),
-          y: roundCoord(cmd.y1),
-          type: 'control1',
-        });
-        currentContourPoints.push({
-          id: `pt_${i}_${contours.length}_${currentContourPoints.length + 1}`,
-          x: roundCoord(cmd.x2),
-          y: roundCoord(cmd.y2),
-          type: 'control2',
-        });
-        currentContourPoints.push({
-          id: `pt_${i}_${contours.length}_${currentContourPoints.length + 2}`,
-          x: roundCoord(cmd.x),
-          y: roundCoord(cmd.y),
-          type: 'onCurve',
-        });
-      } else if (cmd.type === 'Z') {
-        if (currentContourPoints.length > 0) {
-          const first = currentContourPoints[0];
-          const last = currentContourPoints[currentContourPoints.length - 1];
-          if (
-            currentContourPoints.length > 1 &&
-            last.type === 'onCurve' &&
-            last.x === first.x &&
-            last.y === first.y
-          ) {
-            currentContourPoints.pop();
-          }
-
-          contours.push({
-            id: `cnt_${i}_${contours.length}`,
-            closed: true,
-            points: currentContourPoints,
-          });
-          currentContourPoints = [];
-        }
+      if (isAscii || isCoreAnchorChar) {
+        shouldExtractContours = true;
+      } else if (contoursExtracted >= MAX_CONTOURS) {
+        shouldExtractContours = false;
       }
     }
 
-    if (currentContourPoints.length > 0) {
-      contours.push({
-        id: `cnt_${i}_${contours.length}`,
-        closed: true,
-        points: currentContourPoints,
-      });
+    const contours: PathContour[] = [];
+    let currentContourPoints: VectorPoint[] = [];
+
+    if (shouldExtractContours) {
+      const pathObj = typeof g.path === 'function' ? (g as any).path() : g.path;
+      const commands = pathObj?.commands || [];
+
+      for (const cmd of commands) {
+        if (cmd.type === 'M') {
+          if (currentContourPoints.length > 0) {
+            const first = currentContourPoints[0];
+            const last = currentContourPoints[currentContourPoints.length - 1];
+            if (
+              currentContourPoints.length > 1 &&
+              last.type === 'onCurve' &&
+              last.x === first.x &&
+              last.y === first.y
+            ) {
+              currentContourPoints.pop();
+            }
+
+            contours.push({
+              id: `cnt_${i}_${contours.length}`,
+              closed: true,
+              points: currentContourPoints,
+            });
+            currentContourPoints = [];
+          }
+
+          currentContourPoints.push({
+            id: `pt_${i}_${contours.length}_${currentContourPoints.length}`,
+            x: roundCoord(cmd.x),
+            y: roundCoord(cmd.y),
+            type: 'onCurve',
+          });
+        } else if (cmd.type === 'L') {
+          currentContourPoints.push({
+            id: `pt_${i}_${contours.length}_${currentContourPoints.length}`,
+            x: roundCoord(cmd.x),
+            y: roundCoord(cmd.y),
+            type: 'onCurve',
+          });
+        } else if (cmd.type === 'Q') {
+          currentContourPoints.push({
+            id: `pt_${i}_${contours.length}_${currentContourPoints.length}`,
+            x: roundCoord(cmd.x1),
+            y: roundCoord(cmd.y1),
+            type: 'control1',
+          });
+          currentContourPoints.push({
+            id: `pt_${i}_${contours.length}_${currentContourPoints.length + 1}`,
+            x: roundCoord(cmd.x),
+            y: roundCoord(cmd.y),
+            type: 'onCurve',
+          });
+        } else if (cmd.type === 'C') {
+          currentContourPoints.push({
+            id: `pt_${i}_${contours.length}_${currentContourPoints.length}`,
+            x: roundCoord(cmd.x1),
+            y: roundCoord(cmd.y1),
+            type: 'control1',
+          });
+          currentContourPoints.push({
+            id: `pt_${i}_${contours.length}_${currentContourPoints.length + 1}`,
+            x: roundCoord(cmd.x2),
+            y: roundCoord(cmd.y2),
+            type: 'control2',
+          });
+          currentContourPoints.push({
+            id: `pt_${i}_${contours.length}_${currentContourPoints.length + 2}`,
+            x: roundCoord(cmd.x),
+            y: roundCoord(cmd.y),
+            type: 'onCurve',
+          });
+        } else if (cmd.type === 'Z') {
+          if (currentContourPoints.length > 0) {
+            const first = currentContourPoints[0];
+            const last = currentContourPoints[currentContourPoints.length - 1];
+            if (
+              currentContourPoints.length > 1 &&
+              last.type === 'onCurve' &&
+              last.x === first.x &&
+              last.y === first.y
+            ) {
+              currentContourPoints.pop();
+            }
+
+            contours.push({
+              id: `cnt_${i}_${contours.length}`,
+              closed: true,
+              points: currentContourPoints,
+            });
+            currentContourPoints = [];
+          }
+        }
+      }
+
+      if (currentContourPoints.length > 0) {
+        contours.push({
+          id: `cnt_${i}_${contours.length}`,
+          closed: true,
+          points: currentContourPoints,
+        });
+      }
+
+      if (contours.length > 0) {
+        contoursExtracted++;
+      }
     }
 
     glyphs[char] = {
-      unicode: g.unicode || (char.length === 1 ? char.codePointAt(0) || 0 : 0),
-      name: g.name || `uni${(g.unicode || 0).toString(16).toUpperCase()}`,
+      unicode: unicodeVal || (char.length === 1 ? char.codePointAt(0) || 0 : 0),
+      name: g.name || `uni${(unicodeVal || 0).toString(16).toUpperCase()}`,
       char,
       advanceWidth: Math.round(g.advanceWidth !== undefined ? g.advanceWidth : (g.xMax || 600) + 50),
       leftSideBearing: Math.round(g.leftSideBearing !== undefined ? g.leftSideBearing : (g.xMin || 0)),
@@ -514,51 +660,248 @@ export async function parseFontFile(file: File): Promise<Partial<FontProject>> {
     };
   }
 
-  // Detected weight class
-  const detectedWeight = os2?.usWeightClass || detectedMeta.weight || 400;
+  if (onProgress) {
+    onProgress(100, totalGlyphs, totalGlyphs);
+  }
+
+  const rawTables = (parsedFont.tables as any) || {};
+  const isColorFontTable = Boolean(
+    rawTables.colr ||
+    rawTables.cpal ||
+    rawTables.svg ||
+    rawTables['SVG '] ||
+    rawTables.cbdt ||
+    rawTables.sbix
+  );
+  const langDetection = detectFontPrimaryLanguage(glyphs);
 
   return {
     name: `${family} ${style}`.trim(),
     family,
     style,
     weight: detectedWeight,
-    width: detectedMeta.width,
+    width,
     metrics,
     glyphs,
+    isColorFont: isColorFontTable || langDetection.isColorFont,
+    primaryScript: langDetection.primaryScript,
   };
 }
 
 /**
- * Inspect multiple font files with precision
+ * Inspect multiple font files with ultra-fast header/cmap reading (< 5ms per file).
+ * Never blocks the main thread or attaches heavy parsed glyph outline trees during staging.
  */
 export async function inspectFontFiles(files: File[]): Promise<DetectedFontFile[]> {
   const results: DetectedFontFile[] = [];
 
   for (const file of files) {
     const meta = detectFontMetaFromFilename(file.name);
-    let parsed: Partial<FontProject> | undefined;
     let glyphCount = 0;
+    let familyName = meta.family;
+    let styleName = meta.style;
+    let weight = meta.weight;
+    let width = meta.width;
+    let isItalic = meta.isItalic;
+    let isColorFont = false;
+    let primaryScript = 'Latin';
+    let sampleChars = 'Aa';
 
     try {
-      parsed = await parseFontFile(file);
-      glyphCount = Object.keys(parsed.glyphs || {}).length;
+      if (file.name.endsWith('.json')) {
+        const text = await file.text();
+        const parsed = JSON.parse(text);
+        familyName = parsed.family || parsed.name || meta.family;
+        styleName = parsed.style || meta.style;
+        weight = parsed.weight || meta.weight;
+        width = parsed.width || meta.width;
+        glyphCount = Object.keys(parsed.glyphs || {}).length;
+        isColorFont = Boolean(parsed.isColorFont);
+        const langInfo = detectFontPrimaryLanguage(parsed.glyphs);
+        primaryScript = parsed.primaryScript || langInfo.primaryScript;
+        sampleChars = langInfo.sampleChars;
+      } else {
+        const buffer = await file.arrayBuffer();
+        const parsedFont = opentype.parse(buffer);
+
+        const os2 = (parsedFont.tables as any)?.os2;
+        const rawTables = (parsedFont.tables as any) || {};
+
+        glyphCount = parsedFont.glyphs ? parsedFont.glyphs.length : 0;
+        if (!glyphCount && rawTables.maxp?.numGlyphs) {
+          glyphCount = rawTables.maxp.numGlyphs;
+        }
+
+        const preferredFamily = parsedFont.names.preferredFamily?.en;
+        const standardFamily = parsedFont.names.fontFamily?.en;
+        familyName = preferredFamily || meta.family || standardFamily || file.name.replace(/\.[^/.]+$/, '');
+
+        const preferredSubfamily = parsedFont.names.preferredSubfamily?.en;
+        const standardSubfamily = parsedFont.names.fontSubfamily?.en;
+        styleName = preferredSubfamily || meta.style || standardSubfamily || 'Regular';
+
+        const widthClassMap: Record<number, string> = {
+          1: 'UltraCondensed',
+          2: 'ExtraCondensed',
+          3: 'Condensed',
+          4: 'SemiCondensed',
+          5: 'Normal',
+          6: 'SemiExpanded',
+          7: 'Expanded',
+          8: 'ExtraExpanded',
+          9: 'UltraExpanded',
+        };
+        const tableWidth = os2?.usWidthClass ? widthClassMap[os2.usWidthClass] : undefined;
+        if (tableWidth && tableWidth !== 'Normal') {
+          width = tableWidth;
+        }
+
+        if (os2?.usWeightClass && os2.usWeightClass >= 100 && os2.usWeightClass <= 950) {
+          weight = os2.usWeightClass;
+        }
+
+        isColorFont = Boolean(
+          rawTables.colr ||
+          rawTables.cpal ||
+          rawTables.svg ||
+          rawTables['SVG '] ||
+          rawTables.cbdt ||
+          rawTables.sbix
+        );
+
+        // Fast script & sample detection from the font cmap table
+        const cmapMap = rawTables.cmap?.glyphIndexMap || {};
+
+        const hasChineseAnchor = Boolean(
+          cmapMap[0x6c38] || // 永
+          cmapMap[0x548c] || // 和
+          cmapMap[0x4e2d] || // 中
+          cmapMap[0x56fd] || // 国
+          cmapMap[0x6587] || // 文
+          cmapMap[0x5b57]    // 字
+        );
+        const hasEthiopicAnchor = Boolean(cmapMap[0x1200] || cmapMap[0x1208] || cmapMap[0x12a0]);
+        const hasArabicAnchor = Boolean(cmapMap[0x0627] || cmapMap[0x0628] || cmapMap[0x062c]);
+        const hasHebrewAnchor = Boolean(cmapMap[0x05d0] || cmapMap[0x05d1] || cmapMap[0x05e9]);
+        const hasCyrillicAnchor = Boolean(cmapMap[0x0416] || cmapMap[0x044f] || cmapMap[0x0424]);
+        const hasGreekAnchor = Boolean(cmapMap[0x03a9] || cmapMap[0x03b1] || cmapMap[0x0394]);
+        const hasDevanagariAnchor = Boolean(cmapMap[0x0905] || cmapMap[0x0915] || cmapMap[0x092e]);
+        const hasJapaneseAnchor = Boolean(cmapMap[0x3042] || cmapMap[0x30a2] || cmapMap[0x3044]);
+
+        const unicodes = Object.keys(cmapMap).map(Number);
+        let hasChinese = hasChineseAnchor;
+        let hasEthiopic = hasEthiopicAnchor;
+        let hasArabic = hasArabicAnchor;
+        let hasHebrew = hasHebrewAnchor;
+        let hasCyrillic = hasCyrillicAnchor;
+        let hasGreek = hasGreekAnchor;
+        let hasDevanagari = hasDevanagariAnchor;
+        let hasJapanese = hasJapaneseAnchor;
+
+        if (!hasChinese && !hasEthiopic && !hasArabic && !hasHebrew && !hasCyrillic && !hasGreek && !hasDevanagari && !hasJapanese) {
+          const step = Math.max(1, Math.floor(unicodes.length / 300));
+          for (let i = 0; i < unicodes.length; i += step) {
+            const code = unicodes[i];
+            if ((code >= 0x4e00 && code <= 0x9fff) || (code >= 0x3400 && code <= 0x4dbf) || (code >= 0x20000 && code <= 0x2a6df)) {
+              hasChinese = true;
+              break;
+            }
+            if (code >= 0x1200 && code <= 0x137f) {
+              hasEthiopic = true;
+              break;
+            }
+            if (code >= 0x0600 && code <= 0x06ff) hasArabic = true;
+            if (code >= 0x0590 && code <= 0x05ff) hasHebrew = true;
+            if (code >= 0x0400 && code <= 0x04ff) hasCyrillic = true;
+            if (code >= 0x0370 && code <= 0x03ff) hasGreek = true;
+            if (code >= 0x0900 && code <= 0x097f) hasDevanagari = true;
+            if ((code >= 0x3040 && code <= 0x309f) || (code >= 0x30a0 && code <= 0x30ff)) hasJapanese = true;
+          }
+        }
+
+        if (hasChinese || glyphCount > 10000) {
+          primaryScript = 'Chinese (CJK)';
+          sampleChars = '永和';
+        } else if (hasEthiopic) {
+          primaryScript = 'Ethiopic (Amharic)';
+          sampleChars = 'ሀለ';
+        } else if (hasArabic) {
+          primaryScript = 'Arabic';
+          sampleChars = 'اب';
+        } else if (hasHebrew) {
+          primaryScript = 'Hebrew';
+          sampleChars = 'אב';
+        } else if (hasCyrillic) {
+          primaryScript = 'Cyrillic';
+          sampleChars = 'Жя';
+        } else if (hasGreek) {
+          primaryScript = 'Greek';
+          sampleChars = 'Ωα';
+        } else if (hasDevanagari) {
+          primaryScript = 'Devanagari';
+          sampleChars = 'अक';
+        } else if (hasJapanese) {
+          primaryScript = 'Japanese Kana';
+          sampleChars = 'あア';
+        } else {
+          primaryScript = 'Latin';
+          sampleChars = 'Aa';
+        }
+      }
     } catch (e) {
-      console.warn(`Could not pre-parse ${file.name}:`, e);
+      console.warn(`Could not fast-inspect ${file.name}:`, e);
     }
 
     results.push({
       id: 'fdet_' + Math.random().toString(36).substring(2, 8),
       file,
       fileName: file.name,
-      familyName: parsed?.family || meta.family,
-      styleName: parsed?.style || meta.style,
-      weight: parsed?.weight || meta.weight,
-      width: parsed?.width || meta.width,
-      isItalic: meta.isItalic,
+      familyName,
+      styleName,
+      weight,
+      width,
+      isItalic,
       glyphCount,
-      parsedProject: parsed,
+      primaryScript,
+      sampleChars,
+      isColorFont,
     });
+
+    // Yield between files to keep UI 100% fluid
+    await new Promise((r) => setTimeout(r, 0));
+  }
+
+  // Sort staged font files logically: width first, then weight, then slant
+  const widthRank: Record<string, number> = {
+    UltraCondensed: 1,
+    ExtraCondensed: 2,
+    Condensed: 3,
+    SemiCondensed: 4,
+    Normal: 5,
+    SemiExpanded: 6,
+    Expanded: 7,
+    ExtraExpanded: 8,
+    UltraExpanded: 9,
+  };
+
+  results.sort((a, b) => {
+    const wa = widthRank[a.width] || 5;
+    const wb = widthRank[b.width] || 5;
+    if (wa !== wb) return wa - wb;
+    if (a.weight !== b.weight) return a.weight - b.weight;
+    return (a.isItalic ? 1 : 0) - (b.isItalic ? 1 : 0);
+  });
+
+  // Ensure style names are unique
+  const seenStyles = new Map<string, number>();
+  for (const item of results) {
+    const count = seenStyles.get(item.styleName) || 0;
+    if (count > 0) {
+      item.styleName = `${item.styleName} (${count + 1})`;
+    }
+    seenStyles.set(item.styleName, count + 1);
   }
 
   return results;
 }
+

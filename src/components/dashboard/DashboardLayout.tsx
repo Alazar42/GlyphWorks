@@ -1,5 +1,6 @@
 import React from 'react';
-import { Folder, Settings, Cpu, HardDrive } from 'lucide-react';
+import { Folder, HardDrive } from 'lucide-react';
+import { ThemeToggle } from '@/src/components/ui/ThemeToggle';
 
 interface DashboardLayoutProps {
   currentTab: 'projects' | 'settings';
@@ -47,21 +48,28 @@ export const DashboardLayout: React.FC<DashboardLayoutProps> = ({
                   : 'text-neutral-400 hover:text-neutral-200 hover:bg-neutral-900/50'
               }`}
             >
-              <Settings className="w-3.5 h-3.5 shrink-0" />
-              <span>Preferences</span>
+              <HardDrive className="w-3.5 h-3.5 shrink-0" />
+              <span>Storage & .gworks</span>
             </button>
           </nav>
         </div>
 
-        {/* Local Storage & Engine Status */}
-        <div className="p-4 border-t border-neutral-900 space-y-2">
-          <div className="flex items-center gap-2 text-[11px] text-neutral-400 font-mono">
-            <HardDrive className="w-3.5 h-3.5 text-sky-400" />
-            <span>Local IndexedDB</span>
+        {/* Theme Switcher & Storage Status */}
+        <div className="p-4 border-t border-neutral-900 space-y-3">
+          <div className="space-y-1.5">
+            <span className="text-[10px] font-mono uppercase tracking-wider text-neutral-500 block">Theme</span>
+            <ThemeToggle className="w-full justify-between" />
           </div>
-          <p className="text-[10px] text-neutral-500 leading-relaxed">
-            No 5MB storage limits. All typography data stored locally in your browser with zero latency.
-          </p>
+
+          <div className="pt-2 border-t border-neutral-900/80 space-y-1">
+            <div className="flex items-center gap-2 text-[11px] text-neutral-400 font-mono">
+              <span className="w-2 h-2 rounded-full bg-emerald-400"></span>
+              <span>Local IndexedDB</span>
+            </div>
+            <p className="text-[10px] text-neutral-500 leading-relaxed">
+              Offline-first workspace. Backup or load anytime via .gworks.
+            </p>
+          </div>
         </div>
       </aside>
 

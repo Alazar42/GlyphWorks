@@ -9,9 +9,12 @@ import { GlyphBrowser } from '@/src/components/editor/GlyphBrowser';
 import { GlyphInspector } from '@/src/components/editor/GlyphInspector';
 import { FontPreviewDrawer } from '@/src/components/editor/FontPreviewDrawer';
 import { ExportDialog } from '@/src/components/editor/ExportDialog';
+import { AddLanguageDialog } from '@/src/components/editor/AddLanguageDialog';
 import { useToast } from '@/src/components/ui/Toast';
 import { Button } from '@/src/components/ui/Button';
 import { Monitor } from 'lucide-react';
+
+import { detectFontPrimaryLanguage } from '@/src/lib/fonts/languagePresets';
 
 interface EditorPageProps {
   fontId: string;
@@ -25,7 +28,7 @@ export const EditorPage: React.FC<EditorPageProps> = ({ fontId, onNavigate }) =>
   const [brushSize, setBrushSize] = useState<number>(24);
   const [selectedPointIds, setSelectedPointIds] = useState<string[]>([]);
 
-  // Viewport transforms (Godot 2D Viewport-style)
+  // Viewport transforms (focal canvas zoom and pan)
   const [zoom, setZoom] = useState<number>(0.42);
   const [panX, setPanX] = useState<number>(0);
   const [panY, setPanY] = useState<number>(0);
@@ -35,9 +38,10 @@ export const EditorPage: React.FC<EditorPageProps> = ({ fontId, onNavigate }) =>
   // Modals & Panels
   const [isPreviewOpen, setIsPreviewOpen] = useState(false);
   const [isExportOpen, setIsExportOpen] = useState(false);
+  const [isAddLanguageOpen, setIsAddLanguageOpen] = useState(false);
   const [isDirty, setIsDirty] = useState(false);
 
-  // History stack for Undo/Redo (capped at 25 to prevent memory explosion)
+  // History stack for Undo/Redo (capped to prevent memory explosion)
   const [history, setHistory] = useState<FontProject[]>([]);
   const [historyIndex, setHistoryIndex] = useState<number>(-1);
 
@@ -68,23 +72,43 @@ export const EditorPage: React.FC<EditorPageProps> = ({ fontId, onNavigate }) =>
       setHistory([prepared]);
       setHistoryIndex(0);
       setSelectedPointIds([]);
+
+      // Select meaningful initial character: prioritize native script showcase character for non-Latin fonts
+      const lang = detectFontPrimaryLanguage(prepared.glyphs, prepared.primaryScript);
+      if (lang.script !== 'Latin' && lang.showcaseGlyphs.length > 0 && lang.showcaseGlyphs[0]?.char) {
+        setSelectedChar(lang.showcaseGlyphs[0].char);
+      } else {
+        const currentSelected = prepared.glyphs['A'];
+        if (!currentSelected || (!currentSelected.hasCustomPath && (!currentSelected.contours || currentSelected.contours.length === 0))) {
+          if (lang.showcaseGlyphs.length > 0 && lang.showcaseGlyphs[0]?.char) {
+            setSelectedChar(lang.showcaseGlyphs[0].char);
+          } else {
+            const firstWithContour = Object.values(prepared.glyphs).find((g) => g.hasCustomPath || (g.contours && g.contours.length > 0));
+            if (firstWithContour) {
+              setSelectedChar(firstWithContour.char);
+            }
+          }
+        }
+      }
     } else {
       toast({ type: 'error', title: 'Font not found', description: 'Returning to workspace' });
       onNavigate('/dashboard');
     }
   }, [fontId]);
 
-  // Push new state to history (capped at 25 entries to keep memory tight)
+  // Push new state to history (capped at 10 for mega-fonts, 25 for normal fonts)
   const pushStateToHistory = useCallback((newProject: FontProject) => {
+    const isMega = Object.keys(newProject.glyphs).length > 3500;
+    const maxEntries = isMega ? 10 : 25;
     setHistory((prev) => {
       const trimmed = prev.slice(0, historyIndex + 1);
       const next = [...trimmed, newProject];
-      if (next.length > 25) {
-        return next.slice(next.length - 25);
+      if (next.length > maxEntries) {
+        return next.slice(next.length - maxEntries);
       }
       return next;
     });
-    setHistoryIndex((prev) => Math.min(prev + 1, 24));
+    setHistoryIndex((prev) => Math.min(prev + 1, maxEntries - 1));
     setIsDirty(true);
   }, [historyIndex]);
 
@@ -357,9 +381,14 @@ export const EditorPage: React.FC<EditorPageProps> = ({ fontId, onNavigate }) =>
   }
 
   const handleUpdateGlyphContours = (contours: PathContour[], commitHistory: boolean = true) => {
+    const finalizedContours = contours.map((c) => ({
+      ...c,
+      color: c.color || activeGlyph.color,
+    }));
+
     const updatedGlyph: GlyphData = {
       ...activeGlyph,
-      contours,
+      contours: finalizedContours,
       hasCustomPath: true,
     };
 
@@ -371,8 +400,17 @@ export const EditorPage: React.FC<EditorPageProps> = ({ fontId, onNavigate }) =>
       },
     };
 
+    if (updatedProject.types && updatedProject.activeTypeId) {
+      updatedProject.types = updatedProject.types.map((t) =>
+        t.id === updatedProject.activeTypeId
+          ? { ...t, glyphs: updatedProject.glyphs }
+          : t
+      );
+    }
+
     setProject(updatedProject);
     if (commitHistory) {
+      fontStorage.saveProject(updatedProject);
       pushStateToHistory(updatedProject);
     }
   };
@@ -433,6 +471,86 @@ export const EditorPage: React.FC<EditorPageProps> = ({ fontId, onNavigate }) =>
     handleUpdateGlyphContours([], true);
     setSelectedPointIds([]);
     toast({ type: 'info', title: `Cleared outlines for ${selectedChar}` });
+  };
+
+  const handleUpdateGlyphColor = (color?: string) => {
+    const updatedContours = activeGlyph.contours.map((c) => ({
+      ...c,
+      color: color || undefined,
+    }));
+
+    const updatedGlyph: GlyphData = {
+      ...activeGlyph,
+      color,
+      isColor: Boolean(color),
+      contours: updatedContours,
+    };
+
+    const hasAnyColor =
+      Boolean(color) ||
+      Object.values(project.glyphs).some(
+        (g) => g.char !== selectedChar && (g.color || g.isColor || g.contours.some((c) => !!c.color))
+      );
+
+    const updatedProject: FontProject = {
+      ...project,
+      isColorFont: hasAnyColor,
+      glyphs: {
+        ...project.glyphs,
+        [selectedChar]: updatedGlyph,
+      },
+    };
+
+    if (updatedProject.types && updatedProject.activeTypeId) {
+      updatedProject.types = updatedProject.types.map((t) =>
+        t.id === updatedProject.activeTypeId
+          ? { ...t, glyphs: updatedProject.glyphs, isColorFont: hasAnyColor }
+          : t
+      );
+    }
+
+    setProject(updatedProject);
+    fontStorage.saveProject(updatedProject);
+    pushStateToHistory(updatedProject);
+    toast({
+      type: 'success',
+      title: color ? 'Color Saved' : 'Color Reset',
+      description: color ? `Glyph ${selectedChar} saved with color ${color}` : `Reset to standard monochrome`,
+    });
+  };
+
+  const handleUpdateContourColor = (contourId: string, color?: string) => {
+    const newContours = activeGlyph.contours.map((c) => {
+      if (c.id === contourId) {
+        return { ...c, color };
+      }
+      return c;
+    });
+    const hasAnyColor = Boolean(color) || newContours.some((c) => !!c.color);
+    const updatedGlyph: GlyphData = {
+      ...activeGlyph,
+      contours: newContours,
+      color: hasAnyColor ? activeGlyph.color || color : undefined,
+      isColor: hasAnyColor,
+    };
+    const updatedProject: FontProject = {
+      ...project,
+      isColorFont: true,
+      glyphs: {
+        ...project.glyphs,
+        [selectedChar]: updatedGlyph,
+      },
+    };
+    if (updatedProject.types && updatedProject.activeTypeId) {
+      updatedProject.types = updatedProject.types.map((t) =>
+        t.id === updatedProject.activeTypeId
+          ? { ...t, glyphs: updatedProject.glyphs, isColorFont: true }
+          : t
+      );
+    }
+    setProject(updatedProject);
+    fontStorage.saveProject(updatedProject);
+    pushStateToHistory(updatedProject);
   };
 
   const handleUpdatePointCoords = (pointId: string, x: number, y: number, type?: any) => {
@@ -550,6 +668,55 @@ export const EditorPage: React.FC<EditorPageProps> = ({ fontId, onNavigate }) =>
     setPanY(newPanY);
   };
 
+  const handleAddCharacters = (chars: string[]) => {
+    if (!project || chars.length === 0) return;
+
+    const newGlyphs = { ...project.glyphs };
+    let firstAdded = '';
+
+    chars.forEach((c) => {
+      if (!newGlyphs[c]) {
+        const unicode = c.codePointAt(0) || 0;
+        const hex = unicode.toString(16).toUpperCase().padStart(4, '0');
+        newGlyphs[c] = {
+          unicode,
+          name: c === ' ' ? 'space' : `uni${hex}`,
+          char: c,
+          advanceWidth: Math.round(project.metrics.unitsPerEm * 0.6),
+          leftSideBearing: 50,
+          contours: [],
+          hasCustomPath: false,
+        };
+        if (!firstAdded) firstAdded = c;
+      }
+    });
+
+    const updatedProject = {
+      ...project,
+      glyphs: newGlyphs,
+    };
+
+    if (updatedProject.types && updatedProject.activeTypeId) {
+      updatedProject.types = updatedProject.types.map((t) =>
+        t.id === updatedProject.activeTypeId ? { ...t, glyphs: newGlyphs } : t
+      );
+    }
+
+    setProject(updatedProject);
+    pushStateToHistory(updatedProject);
+    fontStorage.saveProject(updatedProject);
+
+    if (firstAdded) {
+      setSelectedChar(firstAdded);
+    }
+
+    toast({
+      type: 'success',
+      title: 'Glyphs Added',
+      description: `Added ${chars.length} glyph(s) to ${project.family}.`,
+    });
+  };
+
   return (
     <div className="h-screen w-screen bg-neutral-950 text-neutral-100 flex flex-col overflow-hidden font-sans">
       {/* Small Screen Fallback */}
@@ -660,6 +827,8 @@ export const EditorPage: React.FC<EditorPageProps> = ({ fontId, onNavigate }) =>
           }}
           onApplyArcToSelectedPoint={handleApplyArcToSelectedPoint}
           onStraightenSelectedSegment={handleStraightenSelectedSegment}
+          onUpdateGlyphColor={handleUpdateGlyphColor}
+          onUpdateContourColor={handleUpdateContourColor}
         />
       </div>
 
@@ -671,6 +840,7 @@ export const EditorPage: React.FC<EditorPageProps> = ({ fontId, onNavigate }) =>
           setSelectedChar(char);
           setSelectedPointIds([]);
         }}
+        onOpenAddLanguage={() => setIsAddLanguageOpen(true)}
       />
 
       {/* Modals */}
@@ -684,6 +854,13 @@ export const EditorPage: React.FC<EditorPageProps> = ({ fontId, onNavigate }) =>
         isOpen={isExportOpen}
         onClose={() => setIsExportOpen(false)}
         project={project}
+      />
+
+      <AddLanguageDialog
+        isOpen={isAddLanguageOpen}
+        onClose={() => setIsAddLanguageOpen(false)}
+        existingGlyphs={project.glyphs}
+        onAddCharacters={handleAddCharacters}
       />
     </div>
   );

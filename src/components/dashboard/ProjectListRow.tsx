@@ -3,6 +3,7 @@ import { FontProject } from '@/src/types/font';
 import { MoreHorizontal, Trash2, Copy, Edit3, Download, Layers } from 'lucide-react';
 import { Dropdown } from '@/src/components/ui/Dropdown';
 import { generateGlyphSvgPath } from '@/src/lib/fonts/fontConverter';
+import { detectFontPrimaryLanguage } from '@/src/lib/fonts/languagePresets';
 
 interface ProjectListRowProps {
   project: FontProject;
@@ -37,18 +38,33 @@ export const ProjectListRow: React.FC<ProjectListRowProps> = ({
     }
   };
 
-  const glyphA = project.glyphs['A'];
-  const glyphSmallA = project.glyphs['a'];
-  const pathA = generateGlyphSvgPath(glyphA);
-  const pathSmallA = generateGlyphSvgPath(glyphSmallA);
-  const hasRealGlyphAa = pathA.length > 0 || pathSmallA.length > 0;
+  // Language & showcase character detection
+  const langInfo = React.useMemo(() => {
+    return detectFontPrimaryLanguage(project.glyphs, project.primaryScript);
+  }, [project.glyphs, project.primaryScript]);
+
+  const isColor = Boolean(project.isColorFont || langInfo.isColorFont);
+  const primaryScript = project.primaryScript || langInfo.primaryScript || langInfo.script;
+
+  const isNonLatin = primaryScript && primaryScript !== 'Latin';
+  const showcase = langInfo.showcaseGlyphs.length > 0
+    ? langInfo.showcaseGlyphs
+    : (isNonLatin ? [] : [project.glyphs['A'], project.glyphs['a']].filter(Boolean));
+
+  const glyph1 = showcase[0];
+  const glyph2 = showcase[1];
+  const path1 = glyph1 ? generateGlyphSvgPath(glyph1) : '';
+  const path2 = glyph2 ? generateGlyphSvgPath(glyph2) : '';
+  const hasRealGlyph = path1.length > 0 || path2.length > 0;
+  const hasPath2 = Boolean(path2 && path2.length > 0);
+
   const ascender = project.metrics?.ascender || 800;
   const descender = project.metrics?.descender || -200;
-  const totalH = ascender - descender;
-  const advA = glyphA?.advanceWidth || 600;
-  const advSmallA = glyphSmallA?.advanceWidth || 500;
+  const totalH = Math.max(ascender - descender, 600);
+  const adv1 = glyph1?.advanceWidth || 600;
+  const adv2 = glyph2?.advanceWidth || 500;
   const spacingBetween = Math.round((project.metrics?.unitsPerEm || 1000) * 0.04);
-  const totalWidth = advA + spacingBetween + advSmallA;
+  const totalWidth = hasPath2 ? adv1 + spacingBetween + adv2 : adv1;
 
   return (
     <div
@@ -57,22 +73,34 @@ export const ProjectListRow: React.FC<ProjectListRowProps> = ({
     >
       <div className="flex items-center gap-4 min-w-0">
         <div className="w-10 h-7 flex items-center justify-center text-neutral-300 group-hover:text-white shrink-0">
-          {hasRealGlyphAa ? (
+          {hasRealGlyph ? (
             <svg
               viewBox={`0 0 ${totalWidth} ${totalH}`}
               className="h-6 w-auto overflow-visible"
             >
               <g transform={`translate(0, ${ascender}) scale(1, -1)`}>
-                {pathA && <path d={pathA} fill="currentColor" fillRule="nonzero" />}
-                {pathSmallA && (
-                  <g transform={`translate(${advA + spacingBetween}, 0)`}>
-                    <path d={pathSmallA} fill="currentColor" fillRule="nonzero" />
+                {path1 && (
+                  <path
+                    d={path1}
+                    fill={glyph1?.color || (isColor ? '#38bdf8' : 'currentColor')}
+                    fillRule="nonzero"
+                  />
+                )}
+                {hasPath2 && (
+                  <g transform={`translate(${adv1 + spacingBetween}, 0)`}>
+                    <path
+                      d={path2}
+                      fill={glyph2?.color || (isColor ? '#ec4899' : 'currentColor')}
+                      fillRule="nonzero"
+                    />
                   </g>
                 )}
               </g>
             </svg>
           ) : (
-            <span className="font-mono text-sm text-neutral-400">Aa</span>
+            <span className="font-mono text-sm text-neutral-400">
+              {langInfo.sampleChars || (isNonLatin ? '' : 'Aa')}
+            </span>
           )}
         </div>
 
@@ -87,7 +115,17 @@ export const ProjectListRow: React.FC<ProjectListRowProps> = ({
                 [{typeCount} types]
               </span>
             ) : (
-              <span className="text-neutral-500 font-mono text-[10px]">({project.style})</span>
+              <span className="text-neutral-400 font-mono text-[10px]">({project.style})</span>
+            )}
+            {primaryScript && primaryScript !== 'Latin' && (
+              <span className="text-[9px] font-mono bg-amber-950/60 border border-amber-800/60 text-amber-300 px-1 py-0.1 rounded-xs">
+                {primaryScript}
+              </span>
+            )}
+            {isColor && (
+              <span className="text-[9px] font-mono bg-purple-950/60 border border-purple-800/60 text-purple-300 px-1 py-0.1 rounded-xs">
+                Color
+              </span>
             )}
           </div>
           <p className="text-[11px] text-neutral-500 font-mono truncate">

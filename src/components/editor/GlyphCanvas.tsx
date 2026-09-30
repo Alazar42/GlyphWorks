@@ -6,7 +6,8 @@ import {
   VectorPoint, 
   PathContour 
 } from '@/src/types/font';
-import { generateGlyphSvgPath } from '@/src/lib/fonts/fontConverter';
+import { generateGlyphSvgPath, generateContourSvgPath } from '@/src/lib/fonts/fontConverter';
+import { useTheme } from '@/src/lib/theme/ThemeContext';
 
 interface GlyphCanvasProps {
   glyph: GlyphData;
@@ -72,6 +73,9 @@ export const GlyphCanvas: React.FC<GlyphCanvasProps> = ({
 
   // Edge hover / Arc tool state
   const [hoveredEdge, setHoveredEdge] = useState<{ contourId: string; startIndex: number } | null>(null);
+
+  const { actualTheme } = useTheme();
+  const isLight = actualTheme === 'light';
   const [isDraggingArc, setIsDraggingArc] = useState(false);
   const [arcDragEdge, setArcDragEdge] = useState<{ contourId: string; startIndex: number } | null>(null);
 
@@ -143,41 +147,76 @@ export const GlyphCanvas: React.FC<GlyphCanvasProps> = ({
     [panX, panY, zoom, metrics.unitsPerEm]
   );
 
-  // Convert freehand stroke points into a closed vector contour with brush width
-  const convertBrushStrokeToContour = (points: Array<{ x: number; y: number }>, width: number): PathContour | null => {
-    if (points.length < 2) return null;
+  // Ramer-Douglas-Peucker line simplification for lightweight vector outlines
+  const simplifyStroke = (points: Array<{ x: number; y: number }>, epsilon: number): Array<{ x: number; y: number }> => {
+    if (points.length <= 2) return points;
 
-    // Simplify / smooth points
-    const smoothed: Array<{ x: number; y: number }> = [points[0]];
-    const minDist = 8;
-    for (let i = 1; i < points.length; i++) {
-      const last = smoothed[smoothed.length - 1];
-      const d = Math.hypot(points[i].x - last.x, points[i].y - last.y);
-      if (d >= minDist || i === points.length - 1) {
-        smoothed.push(points[i]);
+    let maxDist = 0;
+    let index = 0;
+    const p1 = points[0];
+    const p2 = points[points.length - 1];
+    const lineDist = Math.hypot(p2.x - p1.x, p2.y - p1.y);
+
+    for (let i = 1; i < points.length - 1; i++) {
+      const p = points[i];
+      let d = 0;
+      if (lineDist === 0) {
+        d = Math.hypot(p.x - p1.x, p.y - p1.y);
+      } else {
+        d = Math.abs((p2.y - p1.y) * p.x - (p2.x - p1.x) * p.y + p2.x * p1.y - p2.y * p1.x) / lineDist;
+      }
+      if (d > maxDist) {
+        maxDist = d;
+        index = i;
       }
     }
 
-    if (smoothed.length < 2) return null;
+    if (maxDist > epsilon) {
+      const left = simplifyStroke(points.slice(0, index + 1), epsilon);
+      const right = simplifyStroke(points.slice(index), epsilon);
+      return [...left.slice(0, -1), ...right];
+    } else {
+      return [p1, p2];
+    }
+  };
 
-    const halfW = Math.max(3, width / 2);
+  // Convert freehand stroke points into a closed vector contour with minimal node count
+  const convertBrushStrokeToContour = (points: Array<{ x: number; y: number }>, width: number): PathContour | null => {
+    if (points.length < 2) return null;
+
+    // Step 1: Filter out redundant micro-movements
+    const coarse: Array<{ x: number; y: number }> = [points[0]];
+    const minDist = 14;
+    for (let i = 1; i < points.length; i++) {
+      const last = coarse[coarse.length - 1];
+      if (Math.hypot(points[i].x - last.x, points[i].y - last.y) >= minDist || i === points.length - 1) {
+        coarse.push(points[i]);
+      }
+    }
+
+    // Step 2: RDP simplification with adaptive tolerance
+    const epsilon = Math.max(10, Math.min(24, width * 0.25));
+    const simplified = simplifyStroke(coarse, epsilon);
+    if (simplified.length < 2) return null;
+
+    const halfW = Math.max(4, width / 2);
     const leftPoints: VectorPoint[] = [];
     const rightPoints: VectorPoint[] = [];
 
-    for (let i = 0; i < smoothed.length; i++) {
-      const p = smoothed[i];
+    for (let i = 0; i < simplified.length; i++) {
+      const p = simplified[i];
       let dx = 0;
       let dy = 0;
 
       if (i === 0) {
-        dx = smoothed[1].x - p.x;
-        dy = smoothed[1].y - p.y;
-      } else if (i === smoothed.length - 1) {
-        dx = p.x - smoothed[i - 1].x;
-        dy = p.y - smoothed[i - 1].y;
+        dx = simplified[1].x - p.x;
+        dy = simplified[1].y - p.y;
+      } else if (i === simplified.length - 1) {
+        dx = p.x - simplified[i - 1].x;
+        dy = p.y - simplified[i - 1].y;
       } else {
-        dx = smoothed[i + 1].x - smoothed[i - 1].x;
-        dy = smoothed[i + 1].y - smoothed[i - 1].y;
+        dx = simplified[i + 1].x - simplified[i - 1].x;
+        dy = simplified[i + 1].y - simplified[i - 1].y;
       }
 
       const len = Math.hypot(dx, dy) || 1;
@@ -199,7 +238,7 @@ export const GlyphCanvas: React.FC<GlyphCanvasProps> = ({
       });
     }
 
-    // Combine left, end cap, right reversed, start cap into a closed contour
+    // Combine left and reversed right points into a tight, lightweight closed contour
     const contourPoints: VectorPoint[] = [...leftPoints, ...rightPoints.reverse()];
 
     return {
@@ -209,7 +248,7 @@ export const GlyphCanvas: React.FC<GlyphCanvasProps> = ({
     };
   };
 
-  // Godot 2D Viewport Zoom centered at mouse cursor
+  // Canvas Zoom centered at mouse cursor
   const handleWheel = (e: React.WheelEvent) => {
     e.preventDefault();
     if (!containerRef.current) return;
@@ -225,7 +264,7 @@ export const GlyphCanvas: React.FC<GlyphCanvasProps> = ({
       return;
     }
 
-    // Exact Godot 2D Viewport mouse focal zoom formula
+    // Focal mouse zoom anchored to cursor font position
     const fontPos = screenToFont(e.clientX, e.clientY, true);
 
     const zoomFactor = e.deltaY < 0 ? 1.15 : (1 / 1.15);
@@ -411,7 +450,15 @@ export const GlyphCanvas: React.FC<GlyphCanvasProps> = ({
 
     // Free Pen / Brush drawing
     if (isDrawingBrush) {
-      setBrushStrokePoints((prev) => [...prev, { x: fontCoord.x, y: fontCoord.y }]);
+      setBrushStrokePoints((prev) => {
+        if (prev.length > 0) {
+          const last = prev[prev.length - 1];
+          if (Math.hypot(fontCoord.x - last.x, fontCoord.y - last.y) < 10) {
+            return prev;
+          }
+        }
+        return [...prev, { x: fontCoord.x, y: fontCoord.y }];
+      });
       return;
     }
 
@@ -680,9 +727,9 @@ export const GlyphCanvas: React.FC<GlyphCanvasProps> = ({
       {/* Background Grid */}
       {showGrid && (
         <div
-          className="absolute inset-0 pointer-events-none opacity-[0.07]"
+          className="absolute inset-0 pointer-events-none opacity-[0.08]"
           style={{
-            backgroundImage: `linear-gradient(to right, #ffffff 1px, transparent 1px), linear-gradient(to bottom, #ffffff 1px, transparent 1px)`,
+            backgroundImage: `linear-gradient(to right, ${isLight ? '#000000' : '#ffffff'} 1px, transparent 1px), linear-gradient(to bottom, ${isLight ? '#000000' : '#ffffff'} 1px, transparent 1px)`,
             backgroundSize: `${30 * zoom}px ${30 * zoom}px`,
             backgroundPosition: `${panX + (containerRef.current?.clientWidth || 0) / 2}px ${
               panY + (containerRef.current?.clientHeight || 0) / 2
@@ -695,63 +742,63 @@ export const GlyphCanvas: React.FC<GlyphCanvasProps> = ({
       <div className="absolute inset-0 pointer-events-none">
         {/* Ascender line */}
         <div
-          className="absolute inset-x-0 border-b border-dashed border-neutral-700/60"
+          className="absolute inset-x-0 border-b border-dashed border-neutral-400/60 dark:border-neutral-700/60"
           style={{ top: `${ascenderScreen.y}px` }}
         >
-          <span className="absolute right-3 -top-3.5 text-[9px] font-mono text-neutral-500">
+          <span className="absolute right-3 -top-3.5 text-[9px] font-mono text-neutral-600 dark:text-neutral-500">
             Ascender ({metrics.ascender})
           </span>
         </div>
 
         {/* Cap Height line */}
         <div
-          className="absolute inset-x-0 border-b border-dashed border-neutral-600/70"
+          className="absolute inset-x-0 border-b border-dashed border-neutral-500/70 dark:border-neutral-600/70"
           style={{ top: `${capHeightScreen.y}px` }}
         >
-          <span className="absolute right-3 -top-3.5 text-[9px] font-mono text-neutral-400">
+          <span className="absolute right-3 -top-3.5 text-[9px] font-mono text-neutral-700 dark:text-neutral-400">
             Cap Height ({metrics.capHeight})
           </span>
         </div>
 
         {/* x-Height line */}
         <div
-          className="absolute inset-x-0 border-b border-dashed border-neutral-700/60"
+          className="absolute inset-x-0 border-b border-dashed border-neutral-400/60 dark:border-neutral-700/60"
           style={{ top: `${xHeightScreen.y}px` }}
         >
-          <span className="absolute right-3 -top-3.5 text-[9px] font-mono text-neutral-500">
+          <span className="absolute right-3 -top-3.5 text-[9px] font-mono text-neutral-600 dark:text-neutral-500">
             x-Height ({metrics.xHeight})
           </span>
         </div>
 
         {/* Baseline (Solid) */}
         <div
-          className="absolute inset-x-0 border-b border-neutral-400/80"
+          className="absolute inset-x-0 border-b border-neutral-500 dark:border-neutral-400/80"
           style={{ top: `${baseScreen.y}px` }}
         >
-          <span className="absolute right-3 -top-3.5 text-[9px] font-mono text-neutral-300 font-semibold">
+          <span className="absolute right-3 -top-3.5 text-[9px] font-mono text-neutral-800 dark:text-neutral-300 font-semibold">
             Baseline (0)
           </span>
         </div>
 
         {/* Descender line */}
         <div
-          className="absolute inset-x-0 border-b border-dashed border-neutral-700/60"
+          className="absolute inset-x-0 border-b border-dashed border-neutral-400/60 dark:border-neutral-700/60"
           style={{ top: `${descenderScreen.y}px` }}
         >
-          <span className="absolute right-3 -top-3.5 text-[9px] font-mono text-neutral-500">
+          <span className="absolute right-3 -top-3.5 text-[9px] font-mono text-neutral-600 dark:text-neutral-500">
             Descender ({metrics.descender})
           </span>
         </div>
 
         {/* Origin Axis (x=0) */}
         <div
-          className="absolute inset-y-0 border-l border-neutral-800/80"
+          className="absolute inset-y-0 border-l border-neutral-300 dark:border-neutral-800/80"
           style={{ left: `${fontToScreen(0, 0).x}px` }}
         />
 
         {/* Left Side Bearing Guide (Draggable) */}
         <div
-          className="absolute inset-y-0 border-l border-neutral-600/60 pointer-events-auto cursor-ew-resize hover:border-neutral-300 transition-colors"
+          className="absolute inset-y-0 border-l border-neutral-400/70 dark:border-neutral-600/60 pointer-events-auto cursor-ew-resize hover:border-sky-500 dark:hover:border-neutral-300 transition-colors"
           style={{ left: `${lsbScreen.x}px` }}
           onMouseDown={(e) => {
             e.stopPropagation();
@@ -759,14 +806,14 @@ export const GlyphCanvas: React.FC<GlyphCanvasProps> = ({
           }}
           title="Drag Left Side Bearing"
         >
-          <span className="absolute left-1 bottom-8 text-[9px] font-mono text-neutral-400 bg-neutral-900/90 px-1 border border-neutral-800">
+          <span className="absolute left-1 bottom-8 text-[9px] font-mono text-neutral-700 dark:text-neutral-400 bg-white/95 dark:bg-neutral-900/90 px-1.5 py-0.5 border border-neutral-300 dark:border-neutral-800 shadow-xs rounded-xs">
             LSB: {glyph.leftSideBearing || 0}
           </span>
         </div>
 
         {/* Right Side Bearing / Advance Width Guide (Draggable) */}
         <div
-          className="absolute inset-y-0 border-l border-neutral-600/60 pointer-events-auto cursor-ew-resize hover:border-neutral-300 transition-colors"
+          className="absolute inset-y-0 border-l border-neutral-400/70 dark:border-neutral-600/60 pointer-events-auto cursor-ew-resize hover:border-sky-500 dark:hover:border-neutral-300 transition-colors"
           style={{ left: `${rsbScreen.x}px` }}
           onMouseDown={(e) => {
             e.stopPropagation();
@@ -774,7 +821,7 @@ export const GlyphCanvas: React.FC<GlyphCanvasProps> = ({
           }}
           title="Drag Advance Width"
         >
-          <span className="absolute left-1 bottom-8 text-[9px] font-mono text-neutral-400 bg-neutral-900/90 px-1 border border-neutral-800">
+          <span className="absolute left-1 bottom-8 text-[9px] font-mono text-neutral-700 dark:text-neutral-400 bg-white/95 dark:bg-neutral-900/90 px-1.5 py-0.5 border border-neutral-300 dark:border-neutral-800 shadow-xs rounded-xs">
             Width: {glyph.advanceWidth || 600}
           </span>
         </div>
@@ -794,14 +841,33 @@ export const GlyphCanvas: React.FC<GlyphCanvasProps> = ({
             metrics.unitsPerEm * 0.25 * zoom
           }) scale(${zoom}, ${-zoom})`}
         >
-          {/* Filled glyph silhouette */}
-          <path
-            d={generateSvgPath()}
-            fill="rgba(255, 255, 255, 0.08)"
-            stroke="#ffffff"
-            strokeWidth={1.5 / zoom}
-            fillRule="nonzero"
-          />
+          {/* Filled glyph silhouette or individual colored contours */}
+          {glyph.contours.some((c) => !!c.color) ? (
+            glyph.contours.map((c) => {
+              const cPath = generateContourSvgPath(c);
+              const col = c.color || glyph.color || '#38bdf8';
+              return (
+                <path
+                  key={c.id}
+                  d={cPath}
+                  fill={col}
+                  fillOpacity={0.85}
+                  stroke={col}
+                  strokeWidth={1.5 / zoom}
+                  fillRule="nonzero"
+                />
+              );
+            })
+          ) : (
+            <path
+              d={generateSvgPath()}
+              fill={glyph.color ? glyph.color : isLight ? 'rgba(15, 23, 42, 0.08)' : 'rgba(255, 255, 255, 0.08)'}
+              fillOpacity={glyph.color ? 0.85 : undefined}
+              stroke={glyph.color || (isLight ? '#0f172a' : '#ffffff')}
+              strokeWidth={1.5 / zoom}
+              fillRule="nonzero"
+            />
+          )}
 
           {/* Active Free Pen / Brush drawing live stroke preview */}
           {isDrawingBrush && brushStrokePoints.length > 1 && (
@@ -811,7 +877,7 @@ export const GlyphCanvas: React.FC<GlyphCanvasProps> = ({
                 brushStrokePoints.map((p) => `${p.x} ${p.y}`).join(' L ')
               }
               fill="none"
-              stroke="#ffffff"
+              stroke={glyph.color || (isLight ? '#0f172a' : '#ffffff')}
               strokeWidth={brushSize}
               strokeLinecap="round"
               strokeLinejoin="round"
@@ -831,7 +897,7 @@ export const GlyphCanvas: React.FC<GlyphCanvasProps> = ({
                     y1={prev.y}
                     x2={pt.x}
                     y2={pt.y}
-                    stroke="rgba(255, 255, 255, 0.35)"
+                    stroke={isLight ? 'rgba(0, 0, 0, 0.35)' : 'rgba(255, 255, 255, 0.35)'}
                     strokeWidth={1 / zoom}
                     strokeDasharray={`${3 / zoom}, ${3 / zoom}`}
                   />
@@ -954,21 +1020,21 @@ export const GlyphCanvas: React.FC<GlyphCanvasProps> = ({
       )}
 
       {/* Coordinate & Status Info in bottom left */}
-      <div className="absolute bottom-2 left-2 z-10 pointer-events-none flex items-center gap-3 text-[10px] font-mono text-neutral-400 bg-neutral-950/80 px-2.5 py-1 border border-neutral-900 backdrop-blur-xs">
+      <div className="absolute bottom-2 left-2 z-10 pointer-events-none flex items-center gap-3 text-[10px] font-mono text-neutral-600 dark:text-neutral-400 bg-white/95 dark:bg-neutral-950/80 px-2.5 py-1 border border-neutral-300 dark:border-neutral-900 rounded-xs shadow-xs backdrop-blur-xs">
         <span>X: {cursorFontCoord.x}</span>
         <span>Y: {cursorFontCoord.y}</span>
-        <span className="text-neutral-700">|</span>
-        <span className="font-semibold text-neutral-200">{activeTool.toUpperCase()}</span>
+        <span className="text-neutral-300 dark:text-neutral-700">|</span>
+        <span className="font-semibold text-neutral-900 dark:text-neutral-200">{activeTool.toUpperCase()}</span>
         {activeTool === 'brush' && (
           <>
-            <span className="text-neutral-700">|</span>
-            <span className="text-neutral-300">Brush: {brushSize}px</span>
+            <span className="text-neutral-300 dark:text-neutral-700">|</span>
+            <span className="text-neutral-800 dark:text-neutral-300">Brush: {brushSize}px</span>
           </>
         )}
         {selectedPointIds.length > 0 && (
           <>
-            <span className="text-neutral-700">|</span>
-            <span className="text-sky-400 font-semibold">{selectedPointIds.length} nodes selected</span>
+            <span className="text-neutral-300 dark:text-neutral-700">|</span>
+            <span className="text-sky-600 dark:text-sky-400 font-semibold">{selectedPointIds.length} nodes selected</span>
           </>
         )}
       </div>

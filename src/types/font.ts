@@ -10,6 +10,7 @@ export interface PathContour {
   id: string;
   closed: boolean;
   points: VectorPoint[];
+  color?: string; // Optional contour fill/stroke color
 }
 
 export interface GlyphData {
@@ -20,6 +21,8 @@ export interface GlyphData {
   leftSideBearing: number;
   contours: PathContour[];
   hasCustomPath?: boolean;
+  color?: string; // Optional glyph color
+  isColor?: boolean;
 }
 
 export interface FontMetrics {
@@ -39,6 +42,7 @@ export interface FontTypeStyle {
   isItalic?: boolean;
   metrics: FontMetrics;
   glyphs: Record<string, GlyphData>;
+  isColorFont?: boolean;
 }
 
 export interface FontProject {
@@ -60,6 +64,8 @@ export interface FontProject {
   activeTypeId?: string;
   metrics: FontMetrics;
   glyphs: Record<string, GlyphData>; // Keyed by char or glyph name
+  isColorFont?: boolean;
+  primaryScript?: string;
 }
 
 export type EditorTool = 
@@ -91,4 +97,7 @@ export interface DetectedFontFile {
   isItalic: boolean;
   glyphCount?: number;
   parsedProject?: Partial<FontProject>;
+  primaryScript?: string;
+  sampleChars?: string;
+  isColorFont?: boolean;
 }

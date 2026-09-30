@@ -74,7 +74,7 @@ export const ExportDialog: React.FC<ExportDialogProps> = ({
       }
     >
       <div className="space-y-3">
-        <label className="block text-xs font-medium text-neutral-400">
+        <label className="block text-xs font-medium text-neutral-600 dark:text-neutral-400">
           Format
         </label>
         <div className="grid grid-cols-1 gap-1.5">
@@ -82,10 +82,10 @@ export const ExportDialog: React.FC<ExportDialogProps> = ({
             <label
               key={f.id}
               onClick={() => setFormat(f.id)}
-              className={`flex items-center justify-between p-2.5 border cursor-pointer transition-colors ${
+              className={`flex items-center justify-between p-2.5 border rounded-xs cursor-pointer transition-colors ${
                 format === f.id
-                  ? 'border-neutral-400 bg-neutral-800 text-neutral-100'
-                  : 'border-neutral-800 bg-neutral-900/60 text-neutral-400 hover:border-neutral-700 hover:text-neutral-200'
+                  ? 'border-sky-500 bg-sky-50 dark:bg-neutral-800 text-sky-950 dark:text-neutral-100 shadow-xs'
+                  : 'border-neutral-200 dark:border-neutral-800 bg-neutral-50 dark:bg-neutral-900/60 text-neutral-600 dark:text-neutral-400 hover:border-neutral-300 dark:hover:border-neutral-700 hover:text-neutral-900 dark:hover:text-neutral-200'
               }`}
             >
               <div className="flex items-center gap-2.5">
@@ -94,7 +94,7 @@ export const ExportDialog: React.FC<ExportDialogProps> = ({
                   name="font-format"
                   checked={format === f.id}
                   onChange={() => setFormat(f.id)}
-                  className="accent-neutral-100 w-3.5 h-3.5"
+                  className="accent-sky-600 dark:accent-neutral-100 w-3.5 h-3.5 cursor-pointer"
                 />
                 <span className="font-mono text-xs font-semibold">{f.label}</span>
               </div>

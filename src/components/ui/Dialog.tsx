@@ -58,34 +58,34 @@ export const Dialog: React.FC<DialogProps> = ({
         role="dialog"
         aria-modal="true"
         aria-labelledby="dialog-title"
-        className={`relative z-10 w-full ${maxWidths[maxWidth]} bg-neutral-900 border border-neutral-800 shadow-2xl p-6 text-neutral-100 flex flex-col space-y-4`}
+        className={`relative z-10 w-full ${maxWidths[maxWidth]} max-h-[90vh] bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 shadow-2xl p-5 sm:p-6 text-neutral-900 dark:text-neutral-100 flex flex-col rounded-md`}
       >
-        <div className="flex items-start justify-between">
+        <div className="flex items-start justify-between shrink-0 pb-3">
           <div>
-            <h2 id="dialog-title" className="text-sm font-semibold tracking-tight text-neutral-100">
+            <h2 id="dialog-title" className="text-sm font-semibold tracking-tight text-neutral-900 dark:text-neutral-100">
               {title}
             </h2>
             {description && (
-              <p className="mt-1 text-xs text-neutral-400">
+              <p className="mt-1 text-xs text-neutral-500 dark:text-neutral-400">
                 {description}
               </p>
             )}
           </div>
           <button
             onClick={onClose}
-            className="text-neutral-500 hover:text-neutral-200 transition-colors p-1 -mr-1"
+            className="text-neutral-400 hover:text-neutral-700 dark:text-neutral-500 dark:hover:text-neutral-200 transition-colors p-1 -mr-1 cursor-pointer"
             aria-label="Close dialog"
           >
             <X className="w-4 h-4" />
           </button>
         </div>
 
-        <div className="text-xs text-neutral-300">
+        <div className="flex-1 min-h-0 overflow-y-auto text-xs text-neutral-700 dark:text-neutral-300 pr-1">
           {children}
         </div>
 
         {footer && (
-          <div className="flex items-center justify-end gap-2 pt-2 border-t border-neutral-800/80">
+          <div className="shrink-0 flex items-center justify-end gap-2 pt-3 mt-3 border-t border-neutral-200 dark:border-neutral-800/80">
             {footer}
           </div>
         )}

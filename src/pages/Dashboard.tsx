@@ -1,15 +1,15 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { DashboardLayout } from '@/src/components/dashboard/DashboardLayout';
 import { Button } from '@/src/components/ui/Button';
 import { ProjectCard } from '@/src/components/dashboard/ProjectCard';
 import { ProjectListRow } from '@/src/components/dashboard/ProjectListRow';
-import { NewFontDialog } from '@/src/components/dashboard/NewFontDialog';
+import { NewFontDialog, CreateFontData } from '@/src/components/dashboard/NewFontDialog';
 import { ImportFontDialog } from '@/src/components/dashboard/ImportFontDialog';
 import { ExportDialog } from '@/src/components/editor/ExportDialog';
 import { FontProject } from '@/src/types/font';
 import { fontStorage, createNewFontProject, initFontStorage } from '@/src/lib/fonts/fontStorage';
 import { useToast } from '@/src/components/ui/Toast';
-import { Plus, Upload, LayoutGrid, List, Sparkles } from 'lucide-react';
+import { Plus, Upload, LayoutGrid, List, Sparkles, Download, FolderDown } from 'lucide-react';
 
 interface DashboardProps {
   onNavigate: (path: string) => void;
@@ -25,8 +25,46 @@ export const Dashboard: React.FC<DashboardProps> = ({
   const [isNewDialogOpen, setIsNewDialogOpen] = useState(false);
   const [isImportDialogOpen, setIsImportDialogOpen] = useState(false);
   const [exportProject, setExportProject] = useState<FontProject | null>(null);
+  const gworksInputRef = useRef<HTMLInputElement>(null);
 
   const { toast } = useToast();
+
+  const handleImportGworks = async (file: File) => {
+    try {
+      const imported = await fontStorage.importGworksFile(file);
+      toast({
+        type: 'success',
+        title: 'Projects Loaded',
+        description: `Imported ${imported.length} project(s) into this browser.`,
+      });
+      if (imported.length > 0) {
+        onOpenFont(imported[0].id);
+      }
+    } catch (err: any) {
+      toast({
+        type: 'error',
+        title: 'Import Failed',
+        description: err?.message || 'Could not load .gworks file.',
+      });
+    }
+  };
+
+  const handleExportWorkspace = () => {
+    if (projects.length === 0) {
+      toast({
+        type: 'warning',
+        title: 'No Projects to Export',
+        description: 'Create or import a font first.',
+      });
+      return;
+    }
+    fontStorage.exportWorkspaceGworks();
+    toast({
+      type: 'success',
+      title: 'Workspace Exported',
+      description: 'Downloaded .gworks archive for cross-browser transfer.',
+    });
+  };
 
   useEffect(() => {
     // Initialize storage and subscribe to updates
@@ -41,13 +79,15 @@ export const Dashboard: React.FC<DashboardProps> = ({
     return () => unsubscribe();
   }, []);
 
-  const handleCreateProject = (data: { family: string; style: string; weight: number; width: string }) => {
+  const handleCreateProject = (data: CreateFontData) => {
     const newProj = createNewFontProject(data);
     fontStorage.saveProject(newProj);
     toast({
       type: 'success',
-      title: 'Created Font',
-      description: `${newProj.family} (${newProj.style}) is ready for editing.`,
+      title: newProj.isFamily ? 'Created Font Family' : 'Created Font',
+      description: newProj.isFamily
+        ? `${newProj.family} family with ${newProj.types?.length || 1} styles is ready.`
+        : `${newProj.family} (${newProj.style}) is ready for editing.`,
     });
     onOpenFont(newProj.id);
   };
@@ -124,6 +164,40 @@ export const Dashboard: React.FC<DashboardProps> = ({
               </button>
             </div>
 
+            {projects.length > 0 && (
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={handleExportWorkspace}
+                title="Download entire workspace as a .gworks file"
+              >
+                <Download className="w-3.5 h-3.5 mr-1" />
+                Export .gworks
+              </Button>
+            )}
+
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => gworksInputRef.current?.click()}
+              title="Load .gworks file from another browser"
+            >
+              <FolderDown className="w-3.5 h-3.5 mr-1" />
+              Load .gworks
+            </Button>
+
+            <input
+              ref={gworksInputRef}
+              type="file"
+              accept=".gworks,.json"
+              onChange={(e) => {
+                const f = e.target.files?.[0];
+                if (f) handleImportGworks(f);
+                e.target.value = '';
+              }}
+              className="hidden"
+            />
+
             <Button
               variant="outline"
               size="sm"
@@ -155,14 +229,18 @@ export const Dashboard: React.FC<DashboardProps> = ({
               <div className="space-y-1 max-w-sm mx-auto">
                 <h3 className="text-sm font-semibold text-neutral-200">Your foundry is empty</h3>
                 <p className="text-xs text-neutral-500 leading-relaxed">
-                  Start fresh by creating a new typeface or import existing font families (.ttf, .otf, .woff, .json) to inspect and edit.
+                  Create a new typeface, import existing font files (.ttf, .otf, .woff), or load a .gworks workspace archive from another browser.
                 </p>
               </div>
 
-              <div className="flex items-center justify-center gap-3 pt-2">
+              <div className="flex flex-wrap items-center justify-center gap-3 pt-2">
+                <Button size="sm" variant="outline" onClick={() => gworksInputRef.current?.click()}>
+                  <FolderDown className="w-3.5 h-3.5 mr-1" />
+                  Load .gworks File
+                </Button>
                 <Button size="sm" variant="outline" onClick={() => setIsImportDialogOpen(true)}>
                   <Upload className="w-3.5 h-3.5 mr-1" />
-                  Import Font / Family
+                  Import Fonts
                 </Button>
                 <Button size="sm" variant="primary" onClick={() => setIsNewDialogOpen(true)}>
                   <Plus className="w-3.5 h-3.5 mr-1" />
