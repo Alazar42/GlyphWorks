@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { FontProject } from '@/src/types/font';
+import { generateGlyphSvgPath } from '@/src/lib/fonts/fontConverter';
 import { X, RotateCcw } from 'lucide-react';
 import { Button } from '@/src/components/ui/Button';
 
@@ -22,10 +23,29 @@ export const FontPreviewDrawer: React.FC<FontPreviewDrawerProps> = ({
 
   if (!isOpen) return null;
 
+  const upm = project.metrics?.unitsPerEm || 1000;
+  const ascender = project.metrics?.ascender || 800;
+  const descender = project.metrics?.descender || -200;
+  const totalH = ascender - descender;
+  const fontScale = fontSize / upm;
+  const charHeightPx = totalH * fontScale;
+
   // Render a single character using the project's real vector contours if available
   const renderGlyph = (char: string) => {
     if (char === '\n') return <br />;
-    if (char === ' ') return <span style={{ display: 'inline-block', width: `${fontSize * 0.3}px` }}>&nbsp;</span>;
+    if (char === ' ') {
+      return (
+        <span
+          style={{
+            display: 'inline-block',
+            width: `${fontSize * 0.3}px`,
+            height: `${charHeightPx}px`,
+          }}
+        >
+          &nbsp;
+        </span>
+      );
+    }
 
     const glyphData = project.glyphs[char];
     if (!glyphData || !glyphData.contours || glyphData.contours.length === 0) {
@@ -34,6 +54,9 @@ export const FontPreviewDrawer: React.FC<FontPreviewDrawerProps> = ({
           style={{
             letterSpacing: `${spacing}px`,
             fontFamily: 'system-ui, sans-serif',
+            height: `${charHeightPx}px`,
+            display: 'inline-flex',
+            alignItems: 'center',
           }}
         >
           {char}
@@ -41,64 +64,33 @@ export const FontPreviewDrawer: React.FC<FontPreviewDrawerProps> = ({
       );
     }
 
-    // Build SVG path
-    let d = '';
-    glyphData.contours.forEach((contour) => {
-      if (!contour.points || contour.points.length === 0) return;
-      const pts = contour.points;
-      d += `M ${pts[0].x} ${pts[0].y} `;
-      let i = 1;
-      while (i < pts.length) {
-        const pt = pts[i];
-        if (pt.type === 'onCurve') {
-          d += `L ${pt.x} ${pt.y} `;
-          i++;
-        } else if (pt.type === 'control1') {
-          const next = pts[i + 1];
-          if (next && next.type === 'control2') {
-            const end = pts[i + 2] || pts[0];
-            d += `C ${pt.x} ${pt.y}, ${next.x} ${next.y}, ${end.x} ${end.y} `;
-            i += 3;
-          } else {
-            const end = next || pts[0];
-            d += `Q ${pt.x} ${pt.y}, ${end.x} ${end.y} `;
-            i += 2;
-          }
-        } else {
-          d += `L ${pt.x} ${pt.y} `;
-          i++;
-        }
-      }
-      if (contour.closed) d += 'Z ';
-    });
-
-    const upm = project.metrics.unitsPerEm || 1000;
     const adv = glyphData.advanceWidth || 600;
-    const widthInEm = adv / upm;
-    const charWidthPx = widthInEm * fontSize;
-    const heightPx = fontSize * 1.25;
+    const charWidthPx = adv * fontScale;
+    const d = generateGlyphSvgPath(glyphData);
 
     return (
       <span
         style={{
           display: 'inline-block',
           width: `${charWidthPx + spacing}px`,
-          height: `${heightPx}px`,
+          height: `${charHeightPx}px`,
           verticalAlign: 'baseline',
           marginRight: `${spacing}px`,
+          flexShrink: 0,
         }}
         title={`${char} (${adv} units)`}
       >
         <svg
-          viewBox={`0 ${project.metrics.descender} ${adv} ${upm}`}
+          viewBox={`0 0 ${adv} ${totalH}`}
           style={{
             width: `${charWidthPx}px`,
-            height: `${heightPx}px`,
-            overflow: 'visible',
-            transform: 'scale(1, -1)', // Flip font coordinates Y up
+            height: `${charHeightPx}px`,
+            display: 'block',
           }}
         >
-          <path d={d} fill="currentColor" fillRule="evenodd" />
+          <g transform={`translate(0, ${ascender}) scale(1, -1)`}>
+            <path d={d} fill="currentColor" fillRule="nonzero" />
+          </g>
         </svg>
       </span>
     );
@@ -164,12 +156,20 @@ export const FontPreviewDrawer: React.FC<FontPreviewDrawerProps> = ({
             style={{ fontSize: `${fontSize}px` }}
           >
             {sampleText.split('\n').map((line, lineIdx) => (
-              <div key={lineIdx} className="min-h-[1.2em] my-2">
-                {line.length === 0 ? <br /> : line.split('').map((c, charIdx) => (
-                  <React.Fragment key={charIdx}>
-                    {renderGlyph(c)}
-                  </React.Fragment>
-                ))}
+              <div
+                key={lineIdx}
+                className="flex items-baseline flex-wrap my-2"
+                style={{ minHeight: `${charHeightPx}px` }}
+              >
+                {line.length === 0 ? (
+                  <div style={{ height: `${fontSize * 0.5}px` }} />
+                ) : (
+                  line.split('').map((c, charIdx) => (
+                    <React.Fragment key={charIdx}>
+                      {renderGlyph(c)}
+                    </React.Fragment>
+                  ))
+                )}
               </div>
             ))}
           </div>

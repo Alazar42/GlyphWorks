@@ -6,20 +6,23 @@ import {
   VectorPoint, 
   PathContour 
 } from '@/src/types/font';
+import { generateGlyphSvgPath } from '@/src/lib/fonts/fontConverter';
 
 interface GlyphCanvasProps {
   glyph: GlyphData;
   metrics: FontMetrics;
   activeTool: EditorTool;
+  brushSize: number;
   zoom: number;
   panX: number;
   panY: number;
   onUpdatePan: (panX: number, panY: number) => void;
+  onUpdateZoomAndPan: (zoom: number, panX: number, panY: number) => void;
   showGrid: boolean;
   snapToGrid: boolean;
-  selectedPointId: string | null;
-  onSelectPoint: (pointId: string | null) => void;
-  onUpdateGlyphContours: (contours: PathContour[]) => void;
+  selectedPointIds: string[];
+  onSelectPoints: (pointIds: string[]) => void;
+  onUpdateGlyphContours: (contours: PathContour[], commitHistory?: boolean) => void;
   onUpdateMetricsBearing: (bearing: { lsb?: number; advanceWidth?: number }) => void;
 }
 
@@ -27,44 +30,90 @@ export const GlyphCanvas: React.FC<GlyphCanvasProps> = ({
   glyph,
   metrics,
   activeTool,
+  brushSize,
   zoom,
   panX,
   panY,
   onUpdatePan,
+  onUpdateZoomAndPan,
   showGrid,
   snapToGrid,
-  selectedPointId,
-  onSelectPoint,
+  selectedPointIds,
+  onSelectPoints,
   onUpdateGlyphContours,
   onUpdateMetricsBearing,
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
+
+  // Canvas panning state
   const [isDraggingCanvas, setIsDraggingCanvas] = useState(false);
   const [dragStart, setDragStart] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
+  const [isSpacePressed, setIsSpacePressed] = useState(false);
 
-  // Point dragging state
-  const [draggingPointId, setDraggingPointId] = useState<string | null>(null);
+  // Multi-point dragging state
+  const [isDraggingPoints, setIsDraggingPoints] = useState(false);
+  const [pointsDragStartCoord, setPointsDragStartCoord] = useState<{ x: number; y: number } | null>(null);
+  const [initialPointsState, setInitialPointsState] = useState<PathContour[] | null>(null);
+
+  // Guide dragging state
   const [draggingGuide, setDraggingGuide] = useState<'lsb' | 'rsb' | null>(null);
 
-  // Active pen drawing state
+  // Marquee selection box state
+  const [isMarqueeSelecting, setIsMarqueeSelecting] = useState(false);
+  const [marqueeStart, setMarqueeStart] = useState<{ screenX: number; screenY: number }>({ screenX: 0, screenY: 0 });
+  const [marqueeCurrent, setMarqueeCurrent] = useState<{ screenX: number; screenY: number }>({ screenX: 0, screenY: 0 });
+
+  // Free Pen / Brush Tool state
+  const [isDrawingBrush, setIsDrawingBrush] = useState(false);
+  const [brushStrokePoints, setBrushStrokePoints] = useState<Array<{ x: number; y: number }>>([]);
+
+  // Pen tool active contour
   const [activePenContourId, setActivePenContourId] = useState<string | null>(null);
+
+  // Edge hover / Arc tool state
+  const [hoveredEdge, setHoveredEdge] = useState<{ contourId: string; startIndex: number } | null>(null);
+  const [isDraggingArc, setIsDraggingArc] = useState(false);
+  const [arcDragEdge, setArcDragEdge] = useState<{ contourId: string; startIndex: number } | null>(null);
 
   // Current mouse coordinates in font units
   const [cursorFontCoord, setCursorFontCoord] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
 
-  // Calculate font coordinate from viewport mouse event
+  // Spacebar pan listener (Illustrator standard behavior)
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (['INPUT', 'TEXTAREA', 'SELECT'].includes((e.target as HTMLElement).tagName)) return;
+      if (e.code === 'Space' && !e.repeat && !isSpacePressed) {
+        setIsSpacePressed(true);
+      }
+    };
+
+    const handleKeyUp = (e: KeyboardEvent) => {
+      if (e.code === 'Space') {
+        setIsSpacePressed(false);
+        setIsDraggingCanvas(false);
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    window.addEventListener('keyup', handleKeyUp);
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+      window.removeEventListener('keyup', handleKeyUp);
+    };
+  }, [isSpacePressed]);
+
+  // Screen to Font Coordinate mapping
   const screenToFont = useCallback(
-    (screenX: number, screenY: number): { x: number; y: number } => {
+    (screenX: number, screenY: number, bypassSnap: boolean = false): { x: number; y: number } => {
       if (!containerRef.current) return { x: 0, y: 0 };
       const rect = containerRef.current.getBoundingClientRect();
       const originX = rect.width / 2 + panX;
-      // Position baseline in lower half of screen
       const originY = rect.height / 2 + panY + (metrics.unitsPerEm * 0.25 * zoom);
 
       let x = (screenX - rect.left - originX) / zoom;
       let y = (originY - (screenY - rect.top)) / zoom;
 
-      if (snapToGrid) {
+      if (snapToGrid && !bypassSnap) {
         const snapStep = 10;
         x = Math.round(x / snapStep) * snapStep;
         y = Math.round(y / snapStep) * snapStep;
@@ -78,6 +127,7 @@ export const GlyphCanvas: React.FC<GlyphCanvasProps> = ({
     [panX, panY, zoom, metrics.unitsPerEm, snapToGrid]
   );
 
+  // Font to Screen Coordinate mapping
   const fontToScreen = useCallback(
     (fontX: number, fontY: number): { x: number; y: number } => {
       if (!containerRef.current) return { x: 0, y: 0 };
@@ -93,10 +143,104 @@ export const GlyphCanvas: React.FC<GlyphCanvasProps> = ({
     [panX, panY, zoom, metrics.unitsPerEm]
   );
 
+  // Convert freehand stroke points into a closed vector contour with brush width
+  const convertBrushStrokeToContour = (points: Array<{ x: number; y: number }>, width: number): PathContour | null => {
+    if (points.length < 2) return null;
+
+    // Simplify / smooth points
+    const smoothed: Array<{ x: number; y: number }> = [points[0]];
+    const minDist = 8;
+    for (let i = 1; i < points.length; i++) {
+      const last = smoothed[smoothed.length - 1];
+      const d = Math.hypot(points[i].x - last.x, points[i].y - last.y);
+      if (d >= minDist || i === points.length - 1) {
+        smoothed.push(points[i]);
+      }
+    }
+
+    if (smoothed.length < 2) return null;
+
+    const halfW = Math.max(3, width / 2);
+    const leftPoints: VectorPoint[] = [];
+    const rightPoints: VectorPoint[] = [];
+
+    for (let i = 0; i < smoothed.length; i++) {
+      const p = smoothed[i];
+      let dx = 0;
+      let dy = 0;
+
+      if (i === 0) {
+        dx = smoothed[1].x - p.x;
+        dy = smoothed[1].y - p.y;
+      } else if (i === smoothed.length - 1) {
+        dx = p.x - smoothed[i - 1].x;
+        dy = p.y - smoothed[i - 1].y;
+      } else {
+        dx = smoothed[i + 1].x - smoothed[i - 1].x;
+        dy = smoothed[i + 1].y - smoothed[i - 1].y;
+      }
+
+      const len = Math.hypot(dx, dy) || 1;
+      const nx = -dy / len;
+      const ny = dx / len;
+
+      leftPoints.push({
+        id: `pt_br_l_${Date.now()}_${i}_${Math.random().toString(36).substring(2, 5)}`,
+        x: Math.round(p.x + nx * halfW),
+        y: Math.round(p.y + ny * halfW),
+        type: 'onCurve',
+      });
+
+      rightPoints.push({
+        id: `pt_br_r_${Date.now()}_${i}_${Math.random().toString(36).substring(2, 5)}`,
+        x: Math.round(p.x - nx * halfW),
+        y: Math.round(p.y - ny * halfW),
+        type: 'onCurve',
+      });
+    }
+
+    // Combine left, end cap, right reversed, start cap into a closed contour
+    const contourPoints: VectorPoint[] = [...leftPoints, ...rightPoints.reverse()];
+
+    return {
+      id: `cnt_brush_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+      closed: true,
+      points: contourPoints,
+    };
+  };
+
+  // Godot 2D Viewport Zoom centered at mouse cursor
+  const handleWheel = (e: React.WheelEvent) => {
+    e.preventDefault();
+    if (!containerRef.current) return;
+
+    const rect = containerRef.current.getBoundingClientRect();
+    const mouseX = e.clientX - rect.left;
+    const mouseY = e.clientY - rect.top;
+
+    // Trackpad pan or wheel scroll without meta/ctrl
+    if (!e.ctrlKey && !e.metaKey && (Math.abs(e.deltaX) > Math.abs(e.deltaY) || Math.abs(e.deltaY) < 30)) {
+      // Smooth 2D panning
+      onUpdatePan(panX - e.deltaX * 0.8, panY - e.deltaY * 0.8);
+      return;
+    }
+
+    // Exact Godot 2D Viewport mouse focal zoom formula
+    const fontPos = screenToFont(e.clientX, e.clientY, true);
+
+    const zoomFactor = e.deltaY < 0 ? 1.15 : (1 / 1.15);
+    const newZoom = Math.min(8.0, Math.max(0.08, zoom * zoomFactor));
+
+    const newPanX = mouseX - rect.width / 2 - fontPos.x * newZoom;
+    const newPanY = mouseY - rect.height / 2 - (metrics.unitsPerEm * 0.25 - fontPos.y) * newZoom;
+
+    onUpdateZoomAndPan(newZoom, Math.round(newPanX), Math.round(newPanY));
+  };
+
   // Canvas Mouse Down
   const handleMouseDown = (e: React.MouseEvent) => {
-    // Middle click or Pan tool => start panning
-    if (e.button === 1 || activeTool === 'pan') {
+    // Middle click, Spacebar held, or Pan tool => start canvas pan
+    if (e.button === 1 || isSpacePressed || activeTool === 'pan') {
       setIsDraggingCanvas(true);
       setDragStart({ x: e.clientX - panX, y: e.clientY - panY });
       return;
@@ -106,7 +250,21 @@ export const GlyphCanvas: React.FC<GlyphCanvasProps> = ({
 
     const fontCoord = screenToFont(e.clientX, e.clientY);
 
-    // Pen tool logic: add point to contour
+    // Free Pen / Brush Tool
+    if (activeTool === 'brush') {
+      setIsDrawingBrush(true);
+      setBrushStrokePoints([{ x: fontCoord.x, y: fontCoord.y }]);
+      return;
+    }
+
+    // Arc / Curvature Tool
+    if (activeTool === 'arc' && hoveredEdge) {
+      setIsDraggingArc(true);
+      setArcDragEdge(hoveredEdge);
+      return;
+    }
+
+    // Pen Tool: add point to contour
     if (activeTool === 'pen') {
       const contours = [...(glyph.contours || [])];
       let contourIndex = -1;
@@ -117,13 +275,13 @@ export const GlyphCanvas: React.FC<GlyphCanvasProps> = ({
 
       if (contourIndex >= 0 && !contours[contourIndex].closed) {
         const contour = contours[contourIndex];
-        // Check if user clicked near the first point to close contour
+        // Check if user clicked near first point to close contour
         if (contour.points.length > 2) {
           const firstPt = contour.points[0];
           const dist = Math.hypot(firstPt.x - fontCoord.x, firstPt.y - fontCoord.y);
           if (dist < 20 / zoom) {
             contour.closed = true;
-            onUpdateGlyphContours(contours);
+            onUpdateGlyphContours(contours, true);
             setActivePenContourId(null);
             return;
           }
@@ -136,8 +294,8 @@ export const GlyphCanvas: React.FC<GlyphCanvasProps> = ({
           type: 'onCurve',
         };
         contour.points.push(newPoint);
-        onUpdateGlyphContours(contours);
-        onSelectPoint(newPoint.id);
+        onUpdateGlyphContours(contours, true);
+        onSelectPoints([newPoint.id]);
       } else {
         // Start a brand new contour
         const newContourId = `cnt_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
@@ -152,14 +310,14 @@ export const GlyphCanvas: React.FC<GlyphCanvasProps> = ({
           closed: false,
           points: [newPoint],
         });
-        onUpdateGlyphContours(contours);
+        onUpdateGlyphContours(contours, true);
         setActivePenContourId(newContourId);
-        onSelectPoint(newPoint.id);
+        onSelectPoints([newPoint.id]);
       }
       return;
     }
 
-    // Rectangle Primitive Tool
+    // Rectangle Primitive
     if (activeTool === 'rectangle') {
       const w = 180;
       const h = 240;
@@ -175,18 +333,18 @@ export const GlyphCanvas: React.FC<GlyphCanvasProps> = ({
           { id: `pt_${Date.now()}_4`, x: x + w, y, type: 'onCurve' },
         ],
       };
-      onUpdateGlyphContours([...(glyph.contours || []), newContour]);
-      onSelectPoint(newContour.points[0].id);
+      onUpdateGlyphContours([...(glyph.contours || []), newContour], true);
+      onSelectPoints([newContour.points[0].id]);
       return;
     }
 
-    // Ellipse Primitive Tool
+    // Ellipse Primitive
     if (activeTool === 'ellipse') {
       const rx = 120;
       const ry = 140;
       const cx = fontCoord.x;
       const cy = fontCoord.y;
-      const k = 0.5522847498; // Bezier approximation constant for circle
+      const k = 0.5522847498;
       const ox = rx * k;
       const oy = ry * k;
 
@@ -208,13 +366,36 @@ export const GlyphCanvas: React.FC<GlyphCanvasProps> = ({
           { id: `pt_${Date.now()}_11`, x: cx - ox, y: cy + ry, type: 'control2' },
         ],
       };
-      onUpdateGlyphContours([...(glyph.contours || []), newContour]);
-      onSelectPoint(newContour.points[0].id);
+      onUpdateGlyphContours([...(glyph.contours || []), newContour], true);
+      onSelectPoints([newContour.points[0].id]);
       return;
     }
 
-    // Clicking on background deselects
-    onSelectPoint(null);
+    // Line Primitive
+    if (activeTool === 'line') {
+      const len = 200;
+      const newContour: PathContour = {
+        id: `cnt_line_${Date.now()}`,
+        closed: false,
+        points: [
+          { id: `pt_${Date.now()}_1`, x: fontCoord.x, y: fontCoord.y, type: 'onCurve' },
+          { id: `pt_${Date.now()}_2`, x: fontCoord.x + len, y: fontCoord.y, type: 'onCurve' },
+        ],
+      };
+      onUpdateGlyphContours([...(glyph.contours || []), newContour], true);
+      onSelectPoints([newContour.points[1].id]);
+      return;
+    }
+
+    // Select or Node tool on empty canvas => start Marquee Box selection
+    if (activeTool === 'select' || activeTool === 'node') {
+      if (!e.shiftKey) {
+        onSelectPoints([]);
+      }
+      setIsMarqueeSelecting(true);
+      setMarqueeStart({ screenX: e.clientX, screenY: e.clientY });
+      setMarqueeCurrent({ screenX: e.clientX, screenY: e.clientY });
+    }
   };
 
   // Canvas Mouse Move
@@ -222,31 +403,127 @@ export const GlyphCanvas: React.FC<GlyphCanvasProps> = ({
     const fontCoord = screenToFont(e.clientX, e.clientY);
     setCursorFontCoord(fontCoord);
 
+    // Canvas panning
     if (isDraggingCanvas) {
       onUpdatePan(e.clientX - dragStart.x, e.clientY - dragStart.y);
       return;
     }
 
-    // Dragging an existing point
-    if (draggingPointId) {
-      const contours = glyph.contours.map((contour) => ({
+    // Free Pen / Brush drawing
+    if (isDrawingBrush) {
+      setBrushStrokePoints((prev) => [...prev, { x: fontCoord.x, y: fontCoord.y }]);
+      return;
+    }
+
+    // Arcing an edge dynamically
+    if (isDraggingArc && arcDragEdge) {
+      const contour = glyph.contours.find((c) => c.id === arcDragEdge.contourId);
+      if (contour && contour.points.length > arcDragEdge.startIndex) {
+        const p1 = contour.points[arcDragEdge.startIndex];
+        const nextIdx = (arcDragEdge.startIndex + 1) % contour.points.length;
+        const p2 = contour.points[nextIdx];
+
+        // Midpoint and perpendicular displacement
+        const midX = (p1.x + p2.x) / 2;
+        const midY = (p1.y + p2.y) / 2;
+        const c1X = Math.round((p1.x + fontCoord.x) / 2);
+        const c1Y = Math.round((p1.y + fontCoord.y) / 2);
+        const c2X = Math.round((p2.x + fontCoord.x) / 2);
+        const c2Y = Math.round((p2.y + fontCoord.y) / 2);
+
+        // Check if next point is already a control point or insert control handles
+        const newContours = glyph.contours.map((c) => {
+          if (c.id !== arcDragEdge.contourId) return c;
+          const pts = [...c.points];
+          // Replace or insert cubic control points between p1 and p2
+          const insertIdx = arcDragEdge.startIndex + 1;
+          const existingIsControl = pts[insertIdx] && pts[insertIdx].type === 'control1';
+
+          if (existingIsControl) {
+            pts[insertIdx] = { ...pts[insertIdx], x: c1X, y: c1Y };
+            if (pts[insertIdx + 1] && pts[insertIdx + 1].type === 'control2') {
+              pts[insertIdx + 1] = { ...pts[insertIdx + 1], x: c2X, y: c2Y };
+            }
+          } else {
+            const ctrl1: VectorPoint = {
+              id: `pt_arc1_${Date.now()}`,
+              x: c1X,
+              y: c1Y,
+              type: 'control1',
+            };
+            const ctrl2: VectorPoint = {
+              id: `pt_arc2_${Date.now()}`,
+              x: c2X,
+              y: c2Y,
+              type: 'control2',
+            };
+            pts.splice(insertIdx, 0, ctrl1, ctrl2);
+          }
+          return { ...c, points: pts };
+        });
+
+        // Fast interactive update without polluting history on every frame
+        onUpdateGlyphContours(newContours, false);
+      }
+      return;
+    }
+
+    // Moving selected nodes & edges together (Illustrator-grade)
+    if (isDraggingPoints && pointsDragStartCoord && initialPointsState) {
+      const deltaX = fontCoord.x - pointsDragStartCoord.x;
+      const deltaY = fontCoord.y - pointsDragStartCoord.y;
+
+      const selectedSet = new Set(selectedPointIds);
+
+      const movedContours = initialPointsState.map((contour) => ({
         ...contour,
         points: contour.points.map((pt) => {
-          if (pt.id === draggingPointId) {
+          if (selectedSet.has(pt.id)) {
             return {
               ...pt,
-              x: fontCoord.x,
-              y: fontCoord.y,
+              x: pt.x + deltaX,
+              y: pt.y + deltaY,
             };
           }
           return pt;
         }),
       }));
-      onUpdateGlyphContours(contours);
+
+      // High-performance live drag without history spam
+      onUpdateGlyphContours(movedContours, false);
       return;
     }
 
-    // Dragging side bearing guides
+    // Marquee Selection Box
+    if (isMarqueeSelecting) {
+      setMarqueeCurrent({ screenX: e.clientX, screenY: e.clientY });
+
+      // Calculate bounding box in screen coords
+      const minX = Math.min(marqueeStart.screenX, e.clientX);
+      const maxX = Math.max(marqueeStart.screenX, e.clientX);
+      const minY = Math.min(marqueeStart.screenY, e.clientY);
+      const maxY = Math.max(marqueeStart.screenY, e.clientY);
+
+      const enclosedIds: string[] = [];
+      glyph.contours.forEach((c) => {
+        c.points.forEach((pt) => {
+          const ptScreen = fontToScreen(pt.x, pt.y);
+          if (
+            ptScreen.x >= minX &&
+            ptScreen.x <= maxX &&
+            ptScreen.y >= minY &&
+            ptScreen.y <= maxY
+          ) {
+            enclosedIds.push(pt.id);
+          }
+        });
+      });
+
+      onSelectPoints(enclosedIds);
+      return;
+    }
+
+    // Side Bearing guides dragging
     if (draggingGuide === 'lsb') {
       onUpdateMetricsBearing({ lsb: Math.max(0, fontCoord.x) });
       return;
@@ -257,73 +534,112 @@ export const GlyphCanvas: React.FC<GlyphCanvasProps> = ({
     }
   };
 
+  // Canvas Mouse Up
   const handleMouseUp = () => {
     setIsDraggingCanvas(false);
-    setDraggingPointId(null);
+
+    // Commit Brush drawing
+    if (isDrawingBrush) {
+      setIsDrawingBrush(false);
+      if (brushStrokePoints.length > 1) {
+        const newContour = convertBrushStrokeToContour(brushStrokePoints, brushSize);
+        if (newContour) {
+          onUpdateGlyphContours([...(glyph.contours || []), newContour], true);
+          onSelectPoints(newContour.points.map((p) => p.id));
+        }
+      }
+      setBrushStrokePoints([]);
+      return;
+    }
+
+    // Commit Arc drag to history
+    if (isDraggingArc) {
+      setIsDraggingArc(false);
+      setArcDragEdge(null);
+      onUpdateGlyphContours(glyph.contours, true);
+      return;
+    }
+
+    // Commit multi-node move to history
+    if (isDraggingPoints) {
+      setIsDraggingPoints(false);
+      setPointsDragStartCoord(null);
+      setInitialPointsState(null);
+      onUpdateGlyphContours(glyph.contours, true);
+    }
+
+    setIsMarqueeSelecting(false);
     setDraggingGuide(null);
   };
 
-  // Wheel zoom / pan
-  const handleWheel = (e: React.WheelEvent) => {
-    e.preventDefault();
-    if (e.ctrlKey || e.metaKey) {
-      // Zoom
-      // handled by parent or shortcut
-    } else {
-      // Pan
-      onUpdatePan(panX - e.deltaX * 0.8, panY - e.deltaY * 0.8);
-    }
-  };
-
-  // Point Selection / Drag start
+  // Node Point Mouse Down (supports Shift+click multi-selection & dragging together)
   const handlePointMouseDown = (e: React.MouseEvent, pointId: string) => {
     e.stopPropagation();
+
     if (activeTool === 'select' || activeTool === 'node') {
-      onSelectPoint(pointId);
-      setDraggingPointId(pointId);
-    }
-  };
+      let updatedSelectedIds: string[];
 
-  // Build SVG Path command string from contours
-  const generateSvgPath = () => {
-    if (!glyph.contours || glyph.contours.length === 0) return '';
-    let d = '';
-
-    glyph.contours.forEach((contour) => {
-      if (!contour.points || contour.points.length === 0) return;
-      const pts = contour.points;
-      d += `M ${pts[0].x} ${pts[0].y} `;
-
-      let i = 1;
-      while (i < pts.length) {
-        const pt = pts[i];
-        if (pt.type === 'onCurve') {
-          d += `L ${pt.x} ${pt.y} `;
-          i++;
-        } else if (pt.type === 'control1') {
-          const next = pts[i + 1];
-          if (next && next.type === 'control2') {
-            const end = pts[i + 2] || pts[0];
-            d += `C ${pt.x} ${pt.y}, ${next.x} ${next.y}, ${end.x} ${end.y} `;
-            i += 3;
-          } else {
-            const end = next || pts[0];
-            d += `Q ${pt.x} ${pt.y}, ${end.x} ${end.y} `;
-            i += 2;
-          }
+      if (e.shiftKey) {
+        // Toggle selection
+        if (selectedPointIds.includes(pointId)) {
+          updatedSelectedIds = selectedPointIds.filter((id) => id !== pointId);
         } else {
-          d += `L ${pt.x} ${pt.y} `;
-          i++;
+          updatedSelectedIds = [...selectedPointIds, pointId];
+        }
+      } else {
+        // If clicking an unselected point, select only it
+        if (!selectedPointIds.includes(pointId)) {
+          updatedSelectedIds = [pointId];
+        } else {
+          // If already selected, preserve selection to drag together
+          updatedSelectedIds = selectedPointIds;
         }
       }
 
-      if (contour.closed) {
-        d += 'Z ';
-      }
-    });
+      onSelectPoints(updatedSelectedIds);
 
-    return d;
+      // Begin moving all selected points together
+      const fontCoord = screenToFont(e.clientX, e.clientY);
+      setIsDraggingPoints(true);
+      setPointsDragStartCoord(fontCoord);
+      setInitialPointsState(JSON.parse(JSON.stringify(glyph.contours)));
+    }
   };
+
+  // Edge Mouse Down (Adobe Illustrator feature: select edge and move its nodes together)
+  const handleEdgeMouseDown = (e: React.MouseEvent, contourId: string, startIndex: number) => {
+    e.stopPropagation();
+
+    const contour = glyph.contours.find((c) => c.id === contourId);
+    if (!contour) return;
+
+    const p1 = contour.points[startIndex];
+    const nextIdx = (startIndex + 1) % contour.points.length;
+    const p2 = contour.points[nextIdx];
+
+    if (activeTool === 'arc') {
+      setIsDraggingArc(true);
+      setArcDragEdge({ contourId, startIndex });
+      return;
+    }
+
+    if (activeTool === 'select' || activeTool === 'node') {
+      const edgePointIds = [p1.id, p2.id];
+      const updatedSelectedIds = e.shiftKey
+        ? Array.from(new Set([...selectedPointIds, ...edgePointIds]))
+        : edgePointIds;
+
+      onSelectPoints(updatedSelectedIds);
+
+      const fontCoord = screenToFont(e.clientX, e.clientY);
+      setIsDraggingPoints(true);
+      setPointsDragStartCoord(fontCoord);
+      setInitialPointsState(JSON.parse(JSON.stringify(glyph.contours)));
+    }
+  };
+
+  // Generate SVG Path for visual rendering
+  const generateSvgPath = () => generateGlyphSvgPath(glyph);
 
   // Guide screen positions
   const baseScreen = fontToScreen(0, metrics.baseline);
@@ -334,6 +650,14 @@ export const GlyphCanvas: React.FC<GlyphCanvasProps> = ({
   const lsbScreen = fontToScreen(glyph.leftSideBearing || 0, 0);
   const rsbScreen = fontToScreen(glyph.advanceWidth || 600, 0);
 
+  // Marquee box dimensions
+  const marqueeLeft = Math.min(marqueeStart.screenX, marqueeCurrent.screenX) - (containerRef.current?.getBoundingClientRect().left || 0);
+  const marqueeTop = Math.min(marqueeStart.screenY, marqueeCurrent.screenY) - (containerRef.current?.getBoundingClientRect().top || 0);
+  const marqueeWidth = Math.abs(marqueeCurrent.screenX - marqueeStart.screenX);
+  const marqueeHeight = Math.abs(marqueeCurrent.screenY - marqueeStart.screenY);
+
+  const selectedSet = new Set(selectedPointIds);
+
   return (
     <div
       ref={containerRef}
@@ -342,17 +666,21 @@ export const GlyphCanvas: React.FC<GlyphCanvasProps> = ({
       onMouseUp={handleMouseUp}
       onWheel={handleWheel}
       className={`relative flex-1 h-full bg-neutral-950 overflow-hidden select-none ${
-        activeTool === 'pan' || isDraggingCanvas
+        isSpacePressed || activeTool === 'pan' || isDraggingCanvas
           ? 'cursor-grab active:cursor-grabbing'
+          : activeTool === 'brush'
+          ? 'cursor-crosshair'
           : activeTool === 'pen'
           ? 'cursor-crosshair'
+          : activeTool === 'arc'
+          ? 'cursor-pointer'
           : 'cursor-default'
       }`}
     >
       {/* Background Grid */}
       {showGrid && (
         <div
-          className="absolute inset-0 pointer-events-none opacity-[0.06]"
+          className="absolute inset-0 pointer-events-none opacity-[0.07]"
           style={{
             backgroundImage: `linear-gradient(to right, #ffffff 1px, transparent 1px), linear-gradient(to bottom, #ffffff 1px, transparent 1px)`,
             backgroundSize: `${30 * zoom}px ${30 * zoom}px`,
@@ -452,12 +780,10 @@ export const GlyphCanvas: React.FC<GlyphCanvasProps> = ({
         </div>
       </div>
 
-      {/* Primary SVG Vector Layer */}
+      {/* Primary SVG Vector Silhouette Layer */}
       <svg
         className="absolute inset-0 w-full h-full overflow-visible pointer-events-none"
-        style={{
-          transformOrigin: '0 0',
-        }}
+        style={{ transformOrigin: '0 0' }}
       >
         <g
           transform={`translate(${
@@ -474,8 +800,24 @@ export const GlyphCanvas: React.FC<GlyphCanvasProps> = ({
             fill="rgba(255, 255, 255, 0.08)"
             stroke="#ffffff"
             strokeWidth={1.5 / zoom}
-            fillRule="evenodd"
+            fillRule="nonzero"
           />
+
+          {/* Active Free Pen / Brush drawing live stroke preview */}
+          {isDrawingBrush && brushStrokePoints.length > 1 && (
+            <path
+              d={
+                'M ' +
+                brushStrokePoints.map((p) => `${p.x} ${p.y}`).join(' L ')
+              }
+              fill="none"
+              stroke="#ffffff"
+              strokeWidth={brushSize}
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              opacity={0.8}
+            />
+          )}
 
           {/* Node handles and connecting lines for bezier control points */}
           {glyph.contours.map((contour) => {
@@ -489,7 +831,7 @@ export const GlyphCanvas: React.FC<GlyphCanvasProps> = ({
                     y1={prev.y}
                     x2={pt.x}
                     y2={pt.y}
-                    stroke="rgba(255, 255, 255, 0.25)"
+                    stroke="rgba(255, 255, 255, 0.35)"
                     strokeWidth={1 / zoom}
                     strokeDasharray={`${3 / zoom}, ${3 / zoom}`}
                   />
@@ -501,25 +843,77 @@ export const GlyphCanvas: React.FC<GlyphCanvasProps> = ({
         </g>
       </svg>
 
+      {/* Interactive Edges / Path Segments (Illustrator edge selection & arcing) */}
+      <svg className="absolute inset-0 w-full h-full pointer-events-none overflow-visible">
+        {glyph.contours.map((contour) => {
+          if (!contour.points || contour.points.length < 2) return null;
+          return contour.points.map((pt, idx) => {
+            if (pt.type !== 'onCurve') return null;
+            const nextIdx = (idx + 1) % contour.points.length;
+            if (!contour.closed && nextIdx === 0) return null;
+            const nextPt = contour.points[nextIdx];
+
+            const p1Screen = fontToScreen(pt.x, pt.y);
+            const p2Screen = fontToScreen(nextPt.x, nextPt.y);
+
+            const isHovered =
+              hoveredEdge?.contourId === contour.id && hoveredEdge?.startIndex === idx;
+            const bothSelected =
+              selectedSet.has(pt.id) && selectedSet.has(nextPt.id);
+
+            return (
+              <g key={`edge-${contour.id}-${idx}`}>
+                {/* Invisible wide hit area for edge click/drag */}
+                <line
+                  x1={p1Screen.x}
+                  y1={p1Screen.y}
+                  x2={p2Screen.x}
+                  y2={p2Screen.y}
+                  stroke="transparent"
+                  strokeWidth="12"
+                  className="pointer-events-auto cursor-pointer"
+                  onMouseEnter={() => setHoveredEdge({ contourId: contour.id, startIndex: idx })}
+                  onMouseLeave={() => setHoveredEdge(null)}
+                  onMouseDown={(e) => handleEdgeMouseDown(e, contour.id, idx)}
+                />
+                {/* Visible highlight line */}
+                {(isHovered || bothSelected) && (
+                  <line
+                    x1={p1Screen.x}
+                    y1={p1Screen.y}
+                    x2={p2Screen.x}
+                    y2={p2Screen.y}
+                    stroke={bothSelected ? '#38bdf8' : '#ffffff'}
+                    strokeWidth={bothSelected ? '2.5' : '1.5'}
+                    strokeDasharray={isHovered ? '4, 4' : undefined}
+                    className="pointer-events-none"
+                  />
+                )}
+              </g>
+            );
+          });
+        })}
+      </svg>
+
       {/* Interactive Anchor / Node Point Overlays */}
       <div className="absolute inset-0 pointer-events-none">
         {glyph.contours.map((contour) =>
           contour.points.map((pt) => {
             const screen = fontToScreen(pt.x, pt.y);
-            const isSelected = pt.id === selectedPointId;
+            const isSelected = selectedSet.has(pt.id);
             const isControl = pt.type === 'control1' || pt.type === 'control2';
 
             return (
               <div
                 key={pt.id}
                 onMouseDown={(e) => handlePointMouseDown(e, pt.id)}
-                className={`absolute pointer-events-auto transform -translate-x-1/2 -translate-y-1/2 transition-shadow cursor-pointer ${
+                className={`absolute pointer-events-auto transform -translate-x-1/2 -translate-y-1/2 transition-transform cursor-pointer ${
                   isControl
                     ? 'w-2 h-2 rounded-full border border-neutral-300 bg-neutral-900'
                     : 'w-2.5 h-2.5 bg-neutral-100 border border-neutral-950 shadow-sm'
                 } ${
                   isSelected
-                    ? 'ring-2 ring-neutral-100 ring-offset-1 ring-offset-neutral-950 z-20 !bg-neutral-100'
+                    ? 'ring-2 ring-sky-400 ring-offset-1 ring-offset-neutral-950 z-20 !bg-sky-400'
                     : 'hover:scale-125 z-10'
                 }`}
                 style={{
@@ -533,12 +927,50 @@ export const GlyphCanvas: React.FC<GlyphCanvasProps> = ({
         )}
       </div>
 
+      {/* Marquee Selection Rectangle Box */}
+      {isMarqueeSelecting && marqueeWidth > 2 && marqueeHeight > 2 && (
+        <div
+          className="absolute border border-dashed border-sky-400 bg-sky-400/10 pointer-events-none z-30"
+          style={{
+            left: `${marqueeLeft}px`,
+            top: `${marqueeTop}px`,
+            width: `${marqueeWidth}px`,
+            height: `${marqueeHeight}px`,
+          }}
+        />
+      )}
+
+      {/* Live Brush Cursor Indicator */}
+      {activeTool === 'brush' && (
+        <div
+          className="fixed pointer-events-none rounded-full border border-neutral-300/80 bg-white/10 z-40 transform -translate-x-1/2 -translate-y-1/2"
+          style={{
+            width: `${Math.max(6, brushSize * zoom)}px`,
+            height: `${Math.max(6, brushSize * zoom)}px`,
+            left: `${cursorFontCoord ? fontToScreen(cursorFontCoord.x, cursorFontCoord.y).x : -100}px`,
+            top: `${cursorFontCoord ? fontToScreen(cursorFontCoord.x, cursorFontCoord.y).y : -100}px`,
+          }}
+        />
+      )}
+
       {/* Coordinate & Status Info in bottom left */}
-      <div className="absolute bottom-2 left-2 z-10 pointer-events-none flex items-center gap-3 text-[10px] font-mono text-neutral-400 bg-neutral-950/80 px-2 py-1 border border-neutral-900">
+      <div className="absolute bottom-2 left-2 z-10 pointer-events-none flex items-center gap-3 text-[10px] font-mono text-neutral-400 bg-neutral-950/80 px-2.5 py-1 border border-neutral-900 backdrop-blur-xs">
         <span>X: {cursorFontCoord.x}</span>
         <span>Y: {cursorFontCoord.y}</span>
-        <span className="text-neutral-600">|</span>
-        <span>{activeTool.toUpperCase()}</span>
+        <span className="text-neutral-700">|</span>
+        <span className="font-semibold text-neutral-200">{activeTool.toUpperCase()}</span>
+        {activeTool === 'brush' && (
+          <>
+            <span className="text-neutral-700">|</span>
+            <span className="text-neutral-300">Brush: {brushSize}px</span>
+          </>
+        )}
+        {selectedPointIds.length > 0 && (
+          <>
+            <span className="text-neutral-700">|</span>
+            <span className="text-sky-400 font-semibold">{selectedPointIds.length} nodes selected</span>
+          </>
+        )}
       </div>
     </div>
   );

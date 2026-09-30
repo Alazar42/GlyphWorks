@@ -31,10 +31,21 @@ export interface FontMetrics {
   descender: number;
 }
 
+export interface FontTypeStyle {
+  id: string;
+  name: string; // e.g. "Regular", "Bold", "Light Italic"
+  weight: number; // 100 to 950
+  width: string; // "Normal", "Condensed", etc.
+  isItalic?: boolean;
+  metrics: FontMetrics;
+  glyphs: Record<string, GlyphData>;
+}
+
 export interface FontProject {
   id: string;
   name: string;
   family: string;
+  familyId?: string;
   style: string;
   weight: number;
   width: string;
@@ -44,14 +55,19 @@ export interface FontProject {
   license?: string;
   createdAt: string;
   updatedAt: string;
+  isFamily?: boolean;
+  types?: FontTypeStyle[];
+  activeTypeId?: string;
   metrics: FontMetrics;
-  glyphs: Record<string, GlyphData>; // keyed by char or unicode hex
+  glyphs: Record<string, GlyphData>; // Keyed by char or glyph name
 }
 
 export type EditorTool = 
   | 'select' 
   | 'node' 
   | 'pen' 
+  | 'brush'
+  | 'arc'
   | 'line' 
   | 'rectangle' 
   | 'ellipse' 
@@ -62,4 +78,17 @@ export interface EditorViewTransform {
   zoom: number;
   panX: number;
   panY: number;
+}
+
+export interface DetectedFontFile {
+  id: string;
+  file: File;
+  fileName: string;
+  familyName: string;
+  styleName: string;
+  weight: number;
+  width: string;
+  isItalic: boolean;
+  glyphCount?: number;
+  parsedProject?: Partial<FontProject>;
 }

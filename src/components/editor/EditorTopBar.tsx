@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Button } from '@/src/components/ui/Button';
 import { Tooltip } from '@/src/components/ui/Tooltip';
+import { Dialog } from '@/src/components/ui/Dialog';
 import { 
   ArrowLeft, 
   Save, 
@@ -12,13 +13,20 @@ import {
   ZoomOut, 
   Maximize, 
   Grid, 
-  Magnet 
+  Magnet,
+  Layers,
+  Plus,
+  Trash2,
+  Settings2
 } from 'lucide-react';
-import { FontProject } from '@/src/types/font';
+import { FontProject, FontTypeStyle } from '@/src/types/font';
 
 interface EditorTopBarProps {
   project: FontProject;
-  onUpdateProjectName: (name: string) => void;
+  onUpdateProjectMeta: (meta: { family?: string; style?: string; weight?: number; width?: string }) => void;
+  onSwitchType: (typeId: string) => void;
+  onAddTypeToFamily: (typeData: { name: string; weight: number; width: string }) => void;
+  onDeleteTypeFromFamily: (typeId: string) => void;
   onSave: () => void;
   onExport: () => void;
   onTogglePreview: () => void;
@@ -42,7 +50,10 @@ interface EditorTopBarProps {
 
 export const EditorTopBar: React.FC<EditorTopBarProps> = ({
   project,
-  onUpdateProjectName,
+  onUpdateProjectMeta,
+  onSwitchType,
+  onAddTypeToFamily,
+  onDeleteTypeFromFamily,
   onSave,
   onExport,
   onTogglePreview,
@@ -62,181 +73,450 @@ export const EditorTopBar: React.FC<EditorTopBarProps> = ({
   onUndo,
   onRedo,
 }) => {
-  const [isEditingName, setIsEditingName] = useState(false);
-  const [nameValue, setNameValue] = useState(project.name || project.family);
+  // Types in this family
+  const typesList = project.types && project.types.length > 0 ? project.types : [];
+  const hasMultipleTypes = typesList.length > 1;
 
-  const handleNameBlur = () => {
-    setIsEditingName(false);
-    if (nameValue.trim()) {
-      onUpdateProjectName(nameValue.trim());
-    } else {
-      setNameValue(project.name || project.family);
-    }
+  // Manage Types modal state
+  const [isManageTypesOpen, setIsManageTypesOpen] = useState(false);
+  const [newTypeName, setNewTypeName] = useState('');
+  const [newTypeWeight, setNewTypeWeight] = useState(700);
+
+  // Edit metadata modal state
+  const [isMetaModalOpen, setIsMetaModalOpen] = useState(false);
+  const [editFamily, setEditFamily] = useState(project.family);
+  const [editStyle, setEditStyle] = useState(project.style);
+  const [editWeight, setEditWeight] = useState(project.weight);
+  const [editWidth, setEditWidth] = useState(project.width || 'Normal');
+
+  const handleSaveMeta = (e: React.FormEvent) => {
+    e.preventDefault();
+    onUpdateProjectMeta({
+      family: editFamily.trim() || project.family,
+      style: editStyle.trim() || project.style,
+      weight: editWeight,
+      width: editWidth,
+    });
+    setIsMetaModalOpen(false);
+  };
+
+  const handleCreateNewType = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newTypeName.trim()) return;
+    onAddTypeToFamily({
+      name: newTypeName.trim(),
+      weight: newTypeWeight,
+      width: 'Normal',
+    });
+    setNewTypeName('');
   };
 
   return (
-    <header className="h-11 border-b border-neutral-900 bg-neutral-950 px-3 flex items-center justify-between text-xs select-none shrink-0 z-30">
-      {/* Left: Brand & Project Name */}
-      <div className="flex items-center gap-3">
-        <button
-          onClick={onBackToDashboard}
-          title="Back to Projects"
-          className="text-neutral-500 hover:text-neutral-200 transition-colors p-1"
-        >
-          <ArrowLeft className="w-3.5 h-3.5" />
-        </button>
+    <>
+      <header className="h-11 border-b border-neutral-900 bg-neutral-950 px-3 flex items-center justify-between text-xs select-none shrink-0 z-30">
+        {/* Left: Brand & Family Name & Type Switcher */}
+        <div className="flex items-center gap-3">
+          <button
+            onClick={onBackToDashboard}
+            title="Back to Foundry Projects"
+            className="text-neutral-500 hover:text-neutral-200 transition-colors p-1 cursor-pointer"
+          >
+            <ArrowLeft className="w-3.5 h-3.5" />
+          </button>
 
-        <span className="font-mono text-xs font-semibold tracking-wider uppercase text-neutral-400">
-          GlyphWorks
-        </span>
+          <span className="font-mono text-xs font-semibold tracking-wider uppercase text-neutral-400">
+            GlyphWorks
+          </span>
 
-        <span className="text-neutral-700">/</span>
+          <span className="text-neutral-700">/</span>
 
-        {isEditingName ? (
-          <input
-            type="text"
-            value={nameValue}
-            onChange={(e) => setNameValue(e.target.value)}
-            onBlur={handleNameBlur}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') handleNameBlur();
-              if (e.key === 'Escape') {
-                setNameValue(project.name || project.family);
-                setIsEditingName(false);
-              }
+          {/* Family Name */}
+          <button
+            onClick={() => {
+              setEditFamily(project.family);
+              setEditStyle(project.style);
+              setEditWeight(project.weight);
+              setEditWidth(project.width || 'Normal');
+              setIsMetaModalOpen(true);
             }}
-            autoFocus
-            className="bg-neutral-900 border border-neutral-700 px-1.5 py-0.5 text-xs text-neutral-100 font-medium outline-none"
-          />
-        ) : (
-          <button
-            onClick={() => setIsEditingName(true)}
-            className="text-neutral-200 hover:text-white font-medium transition-colors hover:underline cursor-pointer"
-            title="Click to rename"
+            className="text-neutral-200 hover:text-white font-medium transition-colors hover:underline cursor-pointer flex items-center gap-1.5"
+            title="Edit Font & Family Properties"
           >
-            {project.name || project.family}
+            <span className="font-semibold">{project.family}</span>
+            <Settings2 className="w-3 h-3 text-neutral-500 hover:text-neutral-300" />
           </button>
-        )}
 
-        <span className="text-[10px] text-neutral-500 font-mono">
-          {project.style} · {project.weight}
-        </span>
+          {/* Type / Style Switcher for Family Project */}
+          {hasMultipleTypes ? (
+            <div className="flex items-center gap-1.5">
+              <select
+                value={project.activeTypeId || (typesList[0]?.id || '')}
+                onChange={(e) => onSwitchType(e.target.value)}
+                className="bg-neutral-900 border border-neutral-800 hover:border-neutral-700 text-[11px] text-neutral-200 py-0.5 px-2 font-mono outline-none cursor-pointer rounded-xs"
+                title="Switch active font type in this family"
+              >
+                {typesList.map((t) => (
+                  <option key={t.id} value={t.id}>
+                    {t.name} ({t.weight})
+                  </option>
+                ))}
+              </select>
 
-        {isDirty && (
-          <span className="w-1.5 h-1.5 rounded-full bg-neutral-400" title="Unsaved changes" />
-        )}
-      </div>
+              <button
+                onClick={() => setIsManageTypesOpen(true)}
+                className="text-[10px] font-mono bg-sky-950/80 border border-sky-800/80 text-sky-300 px-2 py-0.5 rounded-full hover:bg-sky-900/60 transition-colors cursor-pointer flex items-center gap-1"
+                title="Manage family types"
+              >
+                <Layers className="w-2.5 h-2.5 text-sky-400" />
+                [{typesList.length} types]
+              </button>
+            </div>
+          ) : (
+            <button
+              onClick={() => {
+                setEditFamily(project.family);
+                setEditStyle(project.style);
+                setEditWeight(project.weight);
+                setEditWidth(project.width || 'Normal');
+                setIsMetaModalOpen(true);
+              }}
+              className="text-[11px] text-neutral-400 hover:text-neutral-200 bg-neutral-900/60 border border-neutral-850 px-2 py-0.5 font-mono cursor-pointer rounded-xs"
+              title="Click to edit style and weight"
+            >
+              {project.style} · {project.weight}
+            </button>
+          )}
 
-      {/* Center: Canvas Controls & History */}
-      <div className="hidden sm:flex items-center gap-1 border-x border-neutral-900 px-3">
-        <Tooltip content="Undo" shortcut="⌘Z">
-          <button
-            onClick={onUndo}
-            disabled={!canUndo}
-            className="p-1.5 text-neutral-400 hover:text-neutral-100 disabled:opacity-30 disabled:pointer-events-none transition-colors"
+          {isDirty && (
+            <span className="w-1.5 h-1.5 rounded-full bg-amber-400" title="Unsaved changes" />
+          )}
+        </div>
+
+        {/* Center: Canvas Controls & History */}
+        <div className="hidden sm:flex items-center gap-1 border-x border-neutral-900 px-3">
+          <Tooltip content="Undo" shortcut="⌘Z">
+            <button
+              onClick={onUndo}
+              disabled={!canUndo}
+              className="p-1.5 text-neutral-400 hover:text-neutral-100 disabled:opacity-30 disabled:pointer-events-none transition-colors cursor-pointer"
+            >
+              <Undo2 className="w-3.5 h-3.5" />
+            </button>
+          </Tooltip>
+
+          <Tooltip content="Redo" shortcut="⌘⇧Z">
+            <button
+              onClick={onRedo}
+              disabled={!canRedo}
+              className="p-1.5 text-neutral-400 hover:text-neutral-100 disabled:opacity-30 disabled:pointer-events-none transition-colors cursor-pointer"
+            >
+              <Redo2 className="w-3.5 h-3.5" />
+            </button>
+          </Tooltip>
+
+          <div className="w-px h-3.5 bg-neutral-800 mx-1" />
+
+          <Tooltip content="Zoom In" shortcut="+">
+            <button
+              onClick={onZoomIn}
+              className="p-1.5 text-neutral-400 hover:text-neutral-100 transition-colors cursor-pointer"
+            >
+              <ZoomIn className="w-3.5 h-3.5" />
+            </button>
+          </Tooltip>
+
+          <span className="text-[10px] font-mono text-neutral-500 w-11 text-center tabular-nums">
+            {Math.round(zoom * 100)}%
+          </span>
+
+          <Tooltip content="Zoom Out" shortcut="-">
+            <button
+              onClick={onZoomOut}
+              className="p-1.5 text-neutral-400 hover:text-neutral-100 transition-colors cursor-pointer"
+            >
+              <ZoomOut className="w-3.5 h-3.5" />
+            </button>
+          </Tooltip>
+
+          <Tooltip content="Reset Zoom & Pan (Godot 2D Viewport style)" shortcut="0">
+            <button
+              onClick={onResetZoom}
+              className="p-1.5 text-neutral-400 hover:text-neutral-100 transition-colors cursor-pointer"
+            >
+              <Maximize className="w-3.5 h-3.5" />
+            </button>
+          </Tooltip>
+
+          <div className="w-px h-3.5 bg-neutral-800 mx-1" />
+
+          <Tooltip content="Toggle Grid" shortcut="G">
+            <button
+              onClick={onToggleGrid}
+              className={`p-1.5 transition-colors cursor-pointer rounded-xs ${
+                showGrid ? 'text-neutral-100 bg-neutral-900' : 'text-neutral-500 hover:text-neutral-300'
+              }`}
+            >
+              <Grid className="w-3.5 h-3.5" />
+            </button>
+          </Tooltip>
+
+          <Tooltip content="Snap to Grid" shortcut="S">
+            <button
+              onClick={onToggleSnap}
+              className={`p-1.5 transition-colors cursor-pointer rounded-xs ${
+                snapToGrid ? 'text-neutral-100 bg-neutral-900' : 'text-neutral-500 hover:text-neutral-300'
+              }`}
+            >
+              <Magnet className="w-3.5 h-3.5" />
+            </button>
+          </Tooltip>
+        </div>
+
+        {/* Right: Preview, Save & Export */}
+        <div className="flex items-center gap-2">
+          <Button
+            size="sm"
+            variant={isPreviewOpen ? 'secondary' : 'ghost'}
+            onClick={onTogglePreview}
           >
-            <Undo2 className="w-3.5 h-3.5" />
-          </button>
-        </Tooltip>
+            <Eye className="w-3.5 h-3.5 mr-1" />
+            Proof
+          </Button>
 
-        <Tooltip content="Redo" shortcut="⌘⇧Z">
-          <button
-            onClick={onRedo}
-            disabled={!canRedo}
-            className="p-1.5 text-neutral-400 hover:text-neutral-100 disabled:opacity-30 disabled:pointer-events-none transition-colors"
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={onSave}
+            title="Save font project (⌘S)"
           >
-            <Redo2 className="w-3.5 h-3.5" />
-          </button>
-        </Tooltip>
+            <Save className="w-3.5 h-3.5 mr-1" />
+            Save
+          </Button>
 
-        <div className="w-px h-3.5 bg-neutral-800 mx-1" />
-
-        <Tooltip content="Zoom In" shortcut="+">
-          <button
-            onClick={onZoomIn}
-            className="p-1.5 text-neutral-400 hover:text-neutral-100 transition-colors"
+          <Button
+            size="sm"
+            variant="primary"
+            onClick={onExport}
           >
-            <ZoomIn className="w-3.5 h-3.5" />
-          </button>
-        </Tooltip>
+            <Download className="w-3.5 h-3.5 mr-1" />
+            Export
+          </Button>
+        </div>
+      </header>
 
-        <span className="text-[10px] font-mono text-neutral-500 w-11 text-center tabular-nums">
-          {Math.round(zoom * 100)}%
-        </span>
+      {/* Manage Family Types Modal */}
+      <Dialog
+        isOpen={isManageTypesOpen}
+        onClose={() => setIsManageTypesOpen(false)}
+        title={`Manage Family Types — ${project.family}`}
+        maxWidth="md"
+      >
+        <div className="space-y-5">
+          <p className="text-xs text-neutral-400">
+            This family project currently contains <strong className="text-sky-300 font-mono">[{typesList.length} types]</strong>. You can switch between types at any time in the editor, or add new styles.
+          </p>
 
-        <Tooltip content="Zoom Out" shortcut="-">
-          <button
-            onClick={onZoomOut}
-            className="p-1.5 text-neutral-400 hover:text-neutral-100 transition-colors"
-          >
-            <ZoomOut className="w-3.5 h-3.5" />
-          </button>
-        </Tooltip>
+          <div className="border border-neutral-850 divide-y divide-neutral-900 bg-neutral-950 rounded-xs">
+            {typesList.map((t) => {
+              const isActive = t.id === project.activeTypeId;
+              return (
+                <div key={t.id} className="p-3 flex items-center justify-between text-xs">
+                  <div className="flex items-center gap-3">
+                    <span className={`w-2 h-2 rounded-full ${isActive ? 'bg-sky-400' : 'bg-neutral-750'}`} />
+                    <div>
+                      <p className="font-medium text-neutral-100 flex items-center gap-2">
+                        <span>{t.name}</span>
+                        {isActive && (
+                          <span className="text-[10px] text-sky-400 font-mono bg-sky-950 px-1.5 py-0.2 rounded-xs">
+                            Active in Editor
+                          </span>
+                        )}
+                      </p>
+                      <p className="text-[11px] text-neutral-500 font-mono">
+                        Weight {t.weight} · {t.width} · {Object.keys(t.glyphs || {}).length} glyphs
+                      </p>
+                    </div>
+                  </div>
 
-        <Tooltip content="Reset Zoom & Pan" shortcut="0">
-          <button
-            onClick={onResetZoom}
-            className="p-1.5 text-neutral-400 hover:text-neutral-100 transition-colors"
-          >
-            <Maximize className="w-3.5 h-3.5" />
-          </button>
-        </Tooltip>
+                  <div className="flex items-center gap-2">
+                    {!isActive && (
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        onClick={() => {
+                          onSwitchType(t.id);
+                          setIsManageTypesOpen(false);
+                        }}
+                      >
+                        Switch to this Type
+                      </Button>
+                    )}
+                    {typesList.length > 1 && (
+                      <button
+                        onClick={() => onDeleteTypeFromFamily(t.id)}
+                        disabled={typesList.length <= 1}
+                        className="text-neutral-500 hover:text-rose-400 p-1 transition-colors cursor-pointer"
+                        title="Delete type from family"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
 
-        <div className="w-px h-3.5 bg-neutral-800 mx-1" />
+          {/* Add New Type to Family Form */}
+          <form onSubmit={handleCreateNewType} className="p-3.5 bg-neutral-900/50 border border-neutral-850 rounded-xs space-y-3">
+            <h4 className="text-xs font-mono uppercase tracking-wider text-neutral-300 font-semibold flex items-center gap-1.5">
+              <Plus className="w-3.5 h-3.5 text-sky-400" />
+              <span>Add New Type / Style to Family</span>
+            </h4>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <div>
+                <label className="text-[11px] text-neutral-400 block mb-1">Style Name</label>
+                <input
+                  type="text"
+                  value={newTypeName}
+                  onChange={(e) => setNewTypeName(e.target.value)}
+                  placeholder="e.g. ExtraBold, Light Italic"
+                  className="w-full bg-neutral-950 border border-neutral-800 text-xs text-neutral-100 px-2.5 py-1.5 font-mono outline-none focus:border-neutral-600 rounded-xs"
+                  required
+                />
+              </div>
 
-        <Tooltip content="Toggle Grid" shortcut="G">
-          <button
-            onClick={onToggleGrid}
-            className={`p-1.5 transition-colors ${
-              showGrid ? 'text-neutral-100 bg-neutral-900' : 'text-neutral-500 hover:text-neutral-300'
-            }`}
-          >
-            <Grid className="w-3.5 h-3.5" />
-          </button>
-        </Tooltip>
+              <div>
+                <label className="text-[11px] text-neutral-400 block mb-1">Weight</label>
+                <select
+                  value={newTypeWeight}
+                  onChange={(e) => setNewTypeWeight(parseInt(e.target.value, 10))}
+                  className="w-full bg-neutral-950 border border-neutral-800 text-xs text-neutral-200 px-2.5 py-1.5 font-mono outline-none focus:border-neutral-600 cursor-pointer rounded-xs"
+                >
+                  <option value={100}>100 - Thin</option>
+                  <option value={200}>200 - ExtraLight</option>
+                  <option value={300}>300 - Light</option>
+                  <option value={400}>400 - Regular</option>
+                  <option value={500}>500 - Medium</option>
+                  <option value={600}>600 - SemiBold</option>
+                  <option value={700}>700 - Bold</option>
+                  <option value={800}>800 - ExtraBold</option>
+                  <option value={900}>900 - Black</option>
+                  <option value={950}>950 - ExtraBlack</option>
+                </select>
+              </div>
 
-        <Tooltip content="Snap to Grid" shortcut="S">
-          <button
-            onClick={onToggleSnap}
-            className={`p-1.5 transition-colors ${
-              snapToGrid ? 'text-neutral-100 bg-neutral-900' : 'text-neutral-500 hover:text-neutral-300'
-            }`}
-          >
-            <Magnet className="w-3.5 h-3.5" />
-          </button>
-        </Tooltip>
-      </div>
+              <div className="flex items-end">
+                <Button type="submit" size="sm" variant="primary" className="w-full">
+                  <Plus className="w-3.5 h-3.5 mr-1" />
+                  Add Type
+                </Button>
+              </div>
+            </div>
+          </form>
 
-      {/* Right: Preview, Save & Export */}
-      <div className="flex items-center gap-2">
-        <Button
-          size="sm"
-          variant={isPreviewOpen ? 'secondary' : 'ghost'}
-          onClick={onTogglePreview}
-        >
-          <Eye className="w-3.5 h-3.5 mr-1" />
-          Preview
-        </Button>
+          <div className="flex justify-end pt-2">
+            <Button size="sm" variant="outline" onClick={() => setIsManageTypesOpen(false)}>
+              Done
+            </Button>
+          </div>
+        </div>
+      </Dialog>
 
-        <Button
-          size="sm"
-          variant="outline"
-          onClick={onSave}
-          title="Save project (⌘S)"
-        >
-          <Save className="w-3.5 h-3.5 mr-1" />
-          Save
-        </Button>
+      {/* Edit Font & Family Properties Dialog */}
+      <Dialog
+        isOpen={isMetaModalOpen}
+        onClose={() => setIsMetaModalOpen(false)}
+        title="Edit Font & Family Properties"
+        maxWidth="sm"
+      >
+        <form onSubmit={handleSaveMeta} className="space-y-4">
+          <div>
+            <label className="text-xs font-mono uppercase tracking-wider text-neutral-400 block mb-1">
+              Family Name
+            </label>
+            <input
+              type="text"
+              value={editFamily}
+              onChange={(e) => setEditFamily(e.target.value)}
+              className="w-full bg-neutral-900 border border-neutral-800 text-xs text-neutral-100 px-3 py-1.5 font-mono outline-none focus:border-neutral-600 rounded-xs"
+              required
+            />
+          </div>
 
-        <Button
-          size="sm"
-          variant="primary"
-          onClick={onExport}
-        >
-          <Download className="w-3.5 h-3.5 mr-1" />
-          Export
-        </Button>
-      </div>
-    </header>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="text-xs font-mono uppercase tracking-wider text-neutral-400 block mb-1">
+                Active Style Name
+              </label>
+              <input
+                type="text"
+                value={editStyle}
+                onChange={(e) => setEditStyle(e.target.value)}
+                placeholder="e.g. Regular, Bold"
+                className="w-full bg-neutral-900 border border-neutral-800 text-xs text-neutral-100 px-3 py-1.5 font-mono outline-none focus:border-neutral-600 rounded-xs"
+                required
+              />
+            </div>
+
+            <div>
+              <label className="text-xs font-mono uppercase tracking-wider text-neutral-400 block mb-1">
+                Weight Class
+              </label>
+              <select
+                value={editWeight}
+                onChange={(e) => setEditWeight(parseInt(e.target.value, 10))}
+                className="w-full bg-neutral-900 border border-neutral-800 text-xs text-neutral-200 px-3 py-1.5 font-mono outline-none focus:border-neutral-600 cursor-pointer rounded-xs"
+              >
+                <option value={100}>100 - Thin</option>
+                <option value={200}>200 - ExtraLight</option>
+                <option value={300}>300 - Light</option>
+                <option value={400}>400 - Regular</option>
+                <option value={500}>500 - Medium</option>
+                <option value={600}>600 - SemiBold</option>
+                <option value={700}>700 - Bold</option>
+                <option value={800}>800 - ExtraBold</option>
+                <option value={900}>900 - Black</option>
+                <option value={950}>950 - ExtraBlack</option>
+              </select>
+            </div>
+          </div>
+
+          <div>
+            <label className="text-xs font-mono uppercase tracking-wider text-neutral-400 block mb-1">
+              Width
+            </label>
+            <select
+              value={editWidth}
+              onChange={(e) => setEditWidth(e.target.value)}
+              className="w-full bg-neutral-900 border border-neutral-800 text-xs text-neutral-200 px-3 py-1.5 font-mono outline-none focus:border-neutral-600 cursor-pointer rounded-xs"
+            >
+              <option value="UltraCondensed">UltraCondensed</option>
+              <option value="ExtraCondensed">ExtraCondensed</option>
+              <option value="Condensed">Condensed</option>
+              <option value="SemiCondensed">SemiCondensed</option>
+              <option value="Normal">Normal</option>
+              <option value="SemiExpanded">SemiExpanded</option>
+              <option value="Expanded">Expanded</option>
+              <option value="ExtraExpanded">ExtraExpanded</option>
+            </select>
+          </div>
+
+          <div className="pt-2 flex justify-end gap-2 border-t border-neutral-900">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => setIsMetaModalOpen(false)}
+            >
+              Cancel
+            </Button>
+            <Button type="submit" variant="primary" size="sm">
+              Save Properties
+            </Button>
+          </div>
+        </form>
+      </Dialog>
+    </>
   );
 };

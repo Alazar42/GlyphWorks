@@ -4,18 +4,13 @@
  */
 
 import React, { useState, useEffect } from 'react';
-import { AuthProvider, useAuth } from '@/src/lib/auth/authContext';
 import { ToastProvider } from '@/src/components/ui/Toast';
 import { Landing } from '@/src/pages/Landing';
-import { SignIn } from '@/src/pages/SignIn';
-import { SignUp } from '@/src/pages/SignUp';
-import { ForgotPassword } from '@/src/pages/ForgotPassword';
 import { Dashboard } from '@/src/pages/Dashboard';
 import { EditorPage } from '@/src/pages/EditorPage';
 import { SettingsPage } from '@/src/pages/SettingsPage';
 
 function Router() {
-  const { user, isLoading } = useAuth();
   const [currentPath, setCurrentPath] = useState<string>(() => {
     return window.location.pathname || '/';
   });
@@ -35,47 +30,16 @@ function Router() {
     window.scrollTo(0, 0);
   };
 
-  // Route matching
-  if (isLoading) {
-    return (
-      <div className="min-h-screen bg-neutral-950 flex items-center justify-center text-xs font-mono text-neutral-500">
-        Loading GlyphWorks...
-      </div>
-    );
-  }
-
   // Parse Editor routes: /editor/:id or /fonts/:id
   const editorMatch = currentPath.match(/^\/(?:editor|fonts)\/([^/]+)/);
   if (editorMatch) {
-    if (!user) {
-      return <SignIn onNavigate={navigate} />;
-    }
     const fontId = editorMatch[1];
     return <EditorPage fontId={fontId} onNavigate={navigate} />;
   }
 
   switch (currentPath) {
-    case '/signin':
-      if (user) {
-        navigate('/dashboard');
-        return <Dashboard onNavigate={navigate} onOpenFont={(id) => navigate(`/editor/${id}`)} />;
-      }
-      return <SignIn onNavigate={navigate} />;
-
-    case '/signup':
-      if (user) {
-        navigate('/dashboard');
-        return <Dashboard onNavigate={navigate} onOpenFont={(id) => navigate(`/editor/${id}`)} />;
-      }
-      return <SignUp onNavigate={navigate} />;
-
-    case '/forgot-password':
-      return <ForgotPassword onNavigate={navigate} />;
-
     case '/dashboard':
-      if (!user) {
-        return <SignIn onNavigate={navigate} />;
-      }
+    case '/projects':
       return (
         <Dashboard
           onNavigate={navigate}
@@ -84,9 +48,6 @@ function Router() {
       );
 
     case '/settings':
-      if (!user) {
-        return <SignIn onNavigate={navigate} />;
-      }
       return <SettingsPage onNavigate={navigate} />;
 
     case '/':
@@ -97,10 +58,8 @@ function Router() {
 
 export default function App() {
   return (
-    <AuthProvider>
-      <ToastProvider>
-        <Router />
-      </ToastProvider>
-    </AuthProvider>
+    <ToastProvider>
+      <Router />
+    </ToastProvider>
   );
 }

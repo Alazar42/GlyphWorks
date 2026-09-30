@@ -7,9 +7,9 @@ import { NewFontDialog } from '@/src/components/dashboard/NewFontDialog';
 import { ImportFontDialog } from '@/src/components/dashboard/ImportFontDialog';
 import { ExportDialog } from '@/src/components/editor/ExportDialog';
 import { FontProject } from '@/src/types/font';
-import { fontStorage, createNewFontProject } from '@/src/lib/fonts/fontStorage';
+import { fontStorage, createNewFontProject, initFontStorage } from '@/src/lib/fonts/fontStorage';
 import { useToast } from '@/src/components/ui/Toast';
-import { Plus, Upload, LayoutGrid, List } from 'lucide-react';
+import { Plus, Upload, LayoutGrid, List, Sparkles } from 'lucide-react';
 
 interface DashboardProps {
   onNavigate: (path: string) => void;
@@ -28,48 +28,54 @@ export const Dashboard: React.FC<DashboardProps> = ({
 
   const { toast } = useToast();
 
-  const loadProjects = () => {
-    const list = fontStorage.getAllProjects();
-    setProjects(list);
-  };
-
   useEffect(() => {
-    loadProjects();
+    // Initialize storage and subscribe to updates
+    initFontStorage().then((initial) => {
+      setProjects(initial);
+    });
+
+    const unsubscribe = fontStorage.subscribe((updated) => {
+      setProjects(updated);
+    });
+
+    return () => unsubscribe();
   }, []);
 
   const handleCreateProject = (data: { family: string; style: string; weight: number; width: string }) => {
     const newProj = createNewFontProject(data);
     fontStorage.saveProject(newProj);
-    loadProjects();
     toast({
       type: 'success',
       title: 'Created Font',
-      description: `${newProj.family} is ready for editing.`,
+      description: `${newProj.family} (${newProj.style}) is ready for editing.`,
     });
     onOpenFont(newProj.id);
   };
 
-  const handleImportSuccess = (importedProject: FontProject) => {
-    fontStorage.saveProject(importedProject);
-    loadProjects();
+  const handleImportSuccess = (importedProjects: FontProject[]) => {
+    if (importedProjects.length === 0) return;
+    fontStorage.saveProjects(importedProjects);
+
+    const first = importedProjects[0];
     toast({
       type: 'success',
-      title: 'Import Successful',
-      description: `${importedProject.family} imported with ${Object.keys(importedProject.glyphs).length} glyphs.`,
+      title: importedProjects.length > 1 ? 'Font Family Imported' : 'Font Imported',
+      description:
+        importedProjects.length > 1
+          ? `${first.family} imported with ${importedProjects.length} styles.`
+          : `${first.family} (${first.style}) imported.`,
     });
-    onOpenFont(importedProject.id);
+    onOpenFont(first.id);
   };
 
   const handleDeleteProject = (id: string) => {
     fontStorage.deleteProject(id);
-    loadProjects();
     toast({ type: 'info', title: 'Project removed' });
   };
 
   const handleDuplicateProject = (id: string) => {
     const dup = fontStorage.duplicateProject(id);
     if (dup) {
-      loadProjects();
       toast({ type: 'success', title: 'Project duplicated' });
     }
   };
@@ -78,7 +84,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
     <DashboardLayout
       currentTab="projects"
       onNavigateTab={(tab) => {
-        if (tab === 'settings' || tab === 'account') {
+        if (tab === 'settings') {
           onNavigate('/settings');
         }
       }}
@@ -88,19 +94,19 @@ export const Dashboard: React.FC<DashboardProps> = ({
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-neutral-900">
           <div>
             <h1 className="text-lg font-semibold tracking-tight text-neutral-100">
-              Projects
+              Foundry Projects
             </h1>
             <p className="text-xs text-neutral-500 mt-0.5">
-              {projects.length} {projects.length === 1 ? 'font project' : 'font projects'} in workspace
+              {projects.length} {projects.length === 1 ? 'font' : 'fonts'} in local workspace
             </p>
           </div>
 
           <div className="flex items-center gap-2">
             {/* View switcher */}
-            <div className="flex items-center border border-neutral-800 bg-neutral-900 p-0.5 mr-2">
+            <div className="flex items-center border border-neutral-800 bg-neutral-900 p-0.5 mr-2 rounded-xs">
               <button
                 onClick={() => setViewMode('grid')}
-                className={`p-1 transition-colors ${
+                className={`p-1 transition-colors cursor-pointer rounded-xs ${
                   viewMode === 'grid' ? 'bg-neutral-800 text-neutral-100' : 'text-neutral-500 hover:text-neutral-300'
                 }`}
                 title="Grid view"
@@ -109,7 +115,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
               </button>
               <button
                 onClick={() => setViewMode('list')}
-                className={`p-1 transition-colors ${
+                className={`p-1 transition-colors cursor-pointer rounded-xs ${
                   viewMode === 'list' ? 'bg-neutral-800 text-neutral-100' : 'text-neutral-500 hover:text-neutral-300'
                 }`}
                 title="List view"
@@ -124,7 +130,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
               onClick={() => setIsImportDialogOpen(true)}
             >
               <Upload className="w-3.5 h-3.5 mr-1" />
-              Import
+              Import Fonts
             </Button>
 
             <Button
@@ -140,17 +146,29 @@ export const Dashboard: React.FC<DashboardProps> = ({
 
         {/* Content Section */}
         <div>
-          <div className="text-[11px] font-mono uppercase tracking-wider text-neutral-500 mb-4">
-            Recent
-          </div>
-
           {projects.length === 0 ? (
-            <div className="border border-neutral-900 p-12 text-center space-y-3">
-              <p className="text-xs text-neutral-400">No font projects found.</p>
-              <Button size="sm" variant="primary" onClick={() => setIsNewDialogOpen(true)}>
-                <Plus className="w-3.5 h-3.5 mr-1" />
-                Create First Font
-              </Button>
+            // Clean slate empty state (No sample/demo projects forced on the user)
+            <div className="border border-dashed border-neutral-850 p-16 text-center space-y-4 rounded-xs bg-neutral-900/10">
+              <div className="w-12 h-12 rounded-full bg-neutral-900 border border-neutral-800 flex items-center justify-center mx-auto text-neutral-400">
+                <Sparkles className="w-5 h-5 text-neutral-300" />
+              </div>
+              <div className="space-y-1 max-w-sm mx-auto">
+                <h3 className="text-sm font-semibold text-neutral-200">Your foundry is empty</h3>
+                <p className="text-xs text-neutral-500 leading-relaxed">
+                  Start fresh by creating a new typeface or import existing font families (.ttf, .otf, .woff, .json) to inspect and edit.
+                </p>
+              </div>
+
+              <div className="flex items-center justify-center gap-3 pt-2">
+                <Button size="sm" variant="outline" onClick={() => setIsImportDialogOpen(true)}>
+                  <Upload className="w-3.5 h-3.5 mr-1" />
+                  Import Font / Family
+                </Button>
+                <Button size="sm" variant="primary" onClick={() => setIsNewDialogOpen(true)}>
+                  <Plus className="w-3.5 h-3.5 mr-1" />
+                  Create New Font
+                </Button>
+              </div>
             </div>
           ) : viewMode === 'grid' ? (
             <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
@@ -166,7 +184,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
               ))}
             </div>
           ) : (
-            <div className="border border-neutral-900 bg-neutral-950 divide-y divide-neutral-900">
+            <div className="border border-neutral-900 bg-neutral-950 divide-y divide-neutral-900 rounded-xs overflow-hidden">
               {projects.map((project) => (
                 <ProjectListRow
                   key={project.id}

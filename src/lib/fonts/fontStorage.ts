@@ -1,24 +1,122 @@
 import { FontProject } from '@/src/types/font';
 import { DEFAULT_METRICS, generateInitialGlyphSet } from './defaultFont';
 
-const STORAGE_KEY = 'glyphworks_font_projects_v1';
+const DB_NAME = 'GlyphWorks_DB_v2';
+const DB_VERSION = 1;
+const STORE_NAME = 'font_projects';
+
+// In-memory cache for ultra-fast, synchronous access and 60fps UI rendering
+let projectsCache: FontProject[] = [];
+let isInitialized = false;
+let initPromise: Promise<FontProject[]> | null = null;
+
+// Subscribers for storage changes
+const subscribers = new Set<(projects: FontProject[]) => void>();
+
+function notifySubscribers() {
+  const current = [...projectsCache];
+  subscribers.forEach((callback) => {
+    try {
+      callback(current);
+    } catch (e) {
+      console.error('Error notifying subscriber:', e);
+    }
+  });
+}
+
+/**
+ * Open IndexedDB database with no 5MB limit
+ */
+function openDatabase(): Promise<IDBDatabase> {
+  return new Promise((resolve, reject) => {
+    if (typeof window === 'undefined' || !window.indexedDB) {
+      reject(new Error('IndexedDB not supported in this environment'));
+      return;
+    }
+
+    const request = window.indexedDB.open(DB_NAME, DB_VERSION);
+
+    request.onupgradeneeded = (event) => {
+      const db = (event.target as IDBOpenDBRequest).result;
+      if (!db.objectStoreNames.contains(STORE_NAME)) {
+        const store = db.createObjectStore(STORE_NAME, { keyPath: 'id' });
+        store.createIndex('family', 'family', { unique: false });
+        store.createIndex('updatedAt', 'updatedAt', { unique: false });
+      }
+    };
+
+    request.onsuccess = () => {
+      resolve(request.result);
+    };
+
+    request.onerror = () => {
+      reject(request.error || new Error('Failed to open IndexedDB'));
+    };
+  });
+}
+
+/**
+ * Initialize storage by reading all projects from IndexedDB into memory cache.
+ * NO sample or starting projects are created - starts strictly empty as requested.
+ */
+export async function initFontStorage(): Promise<FontProject[]> {
+  if (isInitialized) return projectsCache;
+  if (initPromise) return initPromise;
+
+  initPromise = (async () => {
+    try {
+      const db = await openDatabase();
+      const transaction = db.transaction(STORE_NAME, 'readonly');
+      const store = transaction.objectStore(STORE_NAME);
+
+      const allRecords: FontProject[] = await new Promise((resolve, reject) => {
+        const req = store.getAll();
+        req.onsuccess = () => resolve(req.result || []);
+        req.onerror = () => reject(req.error);
+      });
+
+      // Sort by updatedAt descending
+      allRecords.sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
+      projectsCache = allRecords;
+      isInitialized = true;
+      notifySubscribers();
+      return projectsCache;
+    } catch (err) {
+      console.warn('Could not initialize IndexedDB, falling back to memory storage:', err);
+      // Strictly empty initial projects - no sample/demo fonts
+      projectsCache = [];
+      isInitialized = true;
+      return projectsCache;
+    }
+  })();
+
+  return initPromise;
+}
+
+// Auto-trigger initialization in browser
+if (typeof window !== 'undefined') {
+  initFontStorage().catch((err) => console.error('Storage init failed:', err));
+}
 
 export function createNewFontProject(params: {
   family?: string;
   style?: string;
   weight?: number;
   width?: string;
+  familyId?: string;
 }): FontProject {
   const family = params.family?.trim() || 'Untitled Font';
   const style = params.style?.trim() || 'Regular';
   const weight = params.weight || 400;
   const width = params.width || 'Normal';
   const now = new Date().toISOString();
+  const familyId = params.familyId || `fam_${family.toLowerCase().replace(/[^a-z0-9]+/g, '_')}`;
 
   return {
     id: 'fnt_' + Math.random().toString(36).substring(2, 9) + Date.now().toString(36),
-    name: family,
+    name: `${family} ${style}`.trim(),
     family,
+    familyId,
     style,
     weight,
     width,
@@ -33,76 +131,97 @@ export function createNewFontProject(params: {
   };
 }
 
-function getInitialProjects(): FontProject[] {
-  const untitled = createNewFontProject({
-    family: 'Untitled Font',
-    style: 'Regular',
-    weight: 400,
-  });
-  // Modify timestamps to match prompt
-  untitled.updatedAt = new Date().toISOString();
-
-  const interDisplay = createNewFontProject({
-    family: 'Inter Display',
-    style: 'Regular',
-    weight: 400,
-  });
-  const yesterday = new Date(Date.now() - 86400000).toISOString();
-  interDisplay.updatedAt = yesterday;
-  interDisplay.createdAt = new Date(Date.now() - 86400000 * 5).toISOString();
-
-  return [untitled, interDisplay];
-}
-
 export const fontStorage = {
+  subscribe(callback: (projects: FontProject[]) => void): () => void {
+    subscribers.add(callback);
+    callback([...projectsCache]);
+    return () => subscribers.delete(callback);
+  },
+
   getAllProjects(): FontProject[] {
-    try {
-      const raw = localStorage.getItem(STORAGE_KEY);
-      if (!raw) {
-        const initial = getInitialProjects();
-        this.saveAllProjects(initial);
-        return initial;
-      }
-      const parsed = JSON.parse(raw);
-      if (!Array.isArray(parsed) || parsed.length === 0) {
-        const initial = getInitialProjects();
-        this.saveAllProjects(initial);
-        return initial;
-      }
-      return parsed;
-    } catch {
-      return getInitialProjects();
-    }
+    return [...projectsCache];
   },
 
   getProjectById(id: string): FontProject | null {
-    const projects = this.getAllProjects();
-    return projects.find((p) => p.id === id) || null;
+    return projectsCache.find((p) => p.id === id) || null;
   },
 
-  saveAllProjects(projects: FontProject[]): void {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(projects));
+  getProjectsByFamily(familyOrFamilyId: string): FontProject[] {
+    const query = familyOrFamilyId.toLowerCase().trim();
+    return projectsCache.filter(
+      (p) => (p.familyId && p.familyId.toLowerCase() === query) || p.family.toLowerCase() === query
+    );
   },
 
   saveProject(project: FontProject): void {
-    const projects = this.getAllProjects();
-    const index = projects.findIndex((p) => p.id === project.id);
-    const updated = {
+    const updated: FontProject = {
       ...project,
       updatedAt: new Date().toISOString(),
     };
 
+    const index = projectsCache.findIndex((p) => p.id === project.id);
     if (index >= 0) {
-      projects[index] = updated;
+      projectsCache[index] = updated;
     } else {
-      projects.unshift(updated);
+      projectsCache.unshift(updated);
     }
-    this.saveAllProjects(projects);
+
+    notifySubscribers();
+
+    // Asynchronously commit to IndexedDB (No 5MB limit)
+    openDatabase()
+      .then((db) => {
+        const tx = db.transaction(STORE_NAME, 'readwrite');
+        const store = tx.objectStore(STORE_NAME);
+        store.put(updated);
+      })
+      .catch((err) => {
+        console.error('Failed to commit font project to IndexedDB:', err);
+      });
+  },
+
+  saveProjects(projects: FontProject[]): void {
+    const now = new Date().toISOString();
+    const prepared = projects.map((p) => ({
+      ...p,
+      updatedAt: p.updatedAt || now,
+    }));
+
+    prepared.forEach((p) => {
+      const idx = projectsCache.findIndex((existing) => existing.id === p.id);
+      if (idx >= 0) {
+        projectsCache[idx] = p;
+      } else {
+        projectsCache.unshift(p);
+      }
+    });
+
+    notifySubscribers();
+
+    openDatabase()
+      .then((db) => {
+        const tx = db.transaction(STORE_NAME, 'readwrite');
+        const store = tx.objectStore(STORE_NAME);
+        prepared.forEach((p) => store.put(p));
+      })
+      .catch((err) => {
+        console.error('Failed to commit multiple projects to IndexedDB:', err);
+      });
   },
 
   deleteProject(id: string): void {
-    const projects = this.getAllProjects().filter((p) => p.id !== id);
-    this.saveAllProjects(projects);
+    projectsCache = projectsCache.filter((p) => p.id !== id);
+    notifySubscribers();
+
+    openDatabase()
+      .then((db) => {
+        const tx = db.transaction(STORE_NAME, 'readwrite');
+        const store = tx.objectStore(STORE_NAME);
+        store.delete(id);
+      })
+      .catch((err) => {
+        console.error('Failed to delete project from IndexedDB:', err);
+      });
   },
 
   duplicateProject(id: string): FontProject | null {
@@ -113,14 +232,38 @@ export const fontStorage = {
       ...JSON.parse(JSON.stringify(original)),
       id: 'fnt_' + Math.random().toString(36).substring(2, 9) + Date.now().toString(36),
       name: `${original.name} Copy`,
-      family: `${original.family} Copy`,
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     };
 
-    const projects = this.getAllProjects();
-    projects.unshift(copy);
-    this.saveAllProjects(projects);
+    projectsCache.unshift(copy);
+    notifySubscribers();
+
+    openDatabase()
+      .then((db) => {
+        const tx = db.transaction(STORE_NAME, 'readwrite');
+        const store = tx.objectStore(STORE_NAME);
+        store.put(copy);
+      })
+      .catch((err) => {
+        console.error('Failed to save duplicate project to IndexedDB:', err);
+      });
+
     return copy;
+  },
+
+  clearAll(): void {
+    projectsCache = [];
+    notifySubscribers();
+
+    openDatabase()
+      .then((db) => {
+        const tx = db.transaction(STORE_NAME, 'readwrite');
+        const store = tx.objectStore(STORE_NAME);
+        store.clear();
+      })
+      .catch((err) => {
+        console.error('Failed to clear IndexedDB:', err);
+      });
   },
 };

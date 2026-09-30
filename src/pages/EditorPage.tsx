@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { FontProject, GlyphData, EditorTool, PathContour, FontMetrics } from '@/src/types/font';
+import { FontProject, GlyphData, EditorTool, PathContour, FontMetrics, VectorPoint, FontTypeStyle } from '@/src/types/font';
 import { fontStorage } from '@/src/lib/fonts/fontStorage';
 import { createDefaultGlyphContours } from '@/src/lib/fonts/defaultFont';
 import { EditorTopBar } from '@/src/components/editor/EditorTopBar';
@@ -22,9 +22,10 @@ export const EditorPage: React.FC<EditorPageProps> = ({ fontId, onNavigate }) =>
   const [project, setProject] = useState<FontProject | null>(null);
   const [selectedChar, setSelectedChar] = useState<string>('A');
   const [activeTool, setActiveTool] = useState<EditorTool>('select');
-  const [selectedPointId, setSelectedPointId] = useState<string | null>(null);
+  const [brushSize, setBrushSize] = useState<number>(24);
+  const [selectedPointIds, setSelectedPointIds] = useState<string[]>([]);
 
-  // Viewport transforms
+  // Viewport transforms (Godot 2D Viewport-style)
   const [zoom, setZoom] = useState<number>(0.42);
   const [panX, setPanX] = useState<number>(0);
   const [panY, setPanY] = useState<number>(0);
@@ -36,7 +37,7 @@ export const EditorPage: React.FC<EditorPageProps> = ({ fontId, onNavigate }) =>
   const [isExportOpen, setIsExportOpen] = useState(false);
   const [isDirty, setIsDirty] = useState(false);
 
-  // History stack for Undo/Redo
+  // History stack for Undo/Redo (capped at 25 to prevent memory explosion)
   const [history, setHistory] = useState<FontProject[]>([]);
   const [historyIndex, setHistoryIndex] = useState<number>(-1);
 
@@ -46,30 +47,52 @@ export const EditorPage: React.FC<EditorPageProps> = ({ fontId, onNavigate }) =>
   useEffect(() => {
     const loaded = fontStorage.getProjectById(fontId);
     if (loaded) {
-      setProject(loaded);
-      setHistory([JSON.parse(JSON.stringify(loaded))]);
+      // Ensure types array is initialized
+      let prepared = { ...loaded };
+      if (!prepared.types || prepared.types.length === 0) {
+        const initialType: FontTypeStyle = {
+          id: 'type_' + Math.random().toString(36).substring(2, 9),
+          name: prepared.style || 'Regular',
+          weight: prepared.weight || 400,
+          width: prepared.width || 'Normal',
+          metrics: { ...prepared.metrics },
+          glyphs: { ...prepared.glyphs },
+        };
+        prepared.types = [initialType];
+        prepared.activeTypeId = initialType.id;
+      } else if (!prepared.activeTypeId) {
+        prepared.activeTypeId = prepared.types[0].id;
+      }
+
+      setProject(prepared);
+      setHistory([prepared]);
       setHistoryIndex(0);
+      setSelectedPointIds([]);
     } else {
-      toast({ type: 'error', title: 'Font not found', description: 'Returning to dashboard' });
+      toast({ type: 'error', title: 'Font not found', description: 'Returning to workspace' });
       onNavigate('/dashboard');
     }
   }, [fontId]);
 
-  // Push new state to history
-  const pushStateToHistory = (newProject: FontProject) => {
+  // Push new state to history (capped at 25 entries to keep memory tight)
+  const pushStateToHistory = useCallback((newProject: FontProject) => {
     setHistory((prev) => {
       const trimmed = prev.slice(0, historyIndex + 1);
-      return [...trimmed, JSON.parse(JSON.stringify(newProject))];
+      const next = [...trimmed, newProject];
+      if (next.length > 25) {
+        return next.slice(next.length - 25);
+      }
+      return next;
     });
-    setHistoryIndex((prev) => prev + 1);
+    setHistoryIndex((prev) => Math.min(prev + 1, 24));
     setIsDirty(true);
-  };
+  }, [historyIndex]);
 
   const handleUndo = useCallback(() => {
     if (historyIndex > 0) {
       const newIdx = historyIndex - 1;
       const targetState = history[newIdx];
-      setProject(JSON.parse(JSON.stringify(targetState)));
+      setProject(targetState);
       setHistoryIndex(newIdx);
       setIsDirty(true);
     }
@@ -79,7 +102,7 @@ export const EditorPage: React.FC<EditorPageProps> = ({ fontId, onNavigate }) =>
     if (historyIndex < history.length - 1) {
       const newIdx = historyIndex + 1;
       const targetState = history[newIdx];
-      setProject(JSON.parse(JSON.stringify(targetState)));
+      setProject(targetState);
       setHistoryIndex(newIdx);
       setIsDirty(true);
     }
@@ -87,19 +110,140 @@ export const EditorPage: React.FC<EditorPageProps> = ({ fontId, onNavigate }) =>
 
   const handleSave = useCallback(() => {
     if (!project) return;
-    fontStorage.saveProject(project);
+    // Sync active glyphs to active type before saving
+    let toSave = { ...project };
+    if (toSave.types && toSave.activeTypeId) {
+      toSave.types = toSave.types.map((t) =>
+        t.id === toSave.activeTypeId
+          ? { ...t, glyphs: toSave.glyphs, metrics: toSave.metrics, name: toSave.style, weight: toSave.weight, width: toSave.width }
+          : t
+      );
+    }
+    fontStorage.saveProject(toSave);
+    setProject(toSave);
     setIsDirty(false);
     toast({
       type: 'success',
-      title: 'Font Saved',
-      description: `${project.family} saved to local foundry.`,
+      title: 'Saved to Foundry',
+      description: `${project.family} saved successfully.`,
     });
   }, [project, toast]);
+
+  // Family Type Switcher (0ms instant switch in-memory)
+  const handleSwitchType = (typeId: string) => {
+    if (!project || !project.types) return;
+
+    // 1. Sync current glyphs into currently active type
+    const updatedTypes = project.types.map((t) =>
+      t.id === project.activeTypeId
+        ? {
+            ...t,
+            glyphs: project.glyphs,
+            metrics: project.metrics,
+            name: project.style,
+            weight: project.weight,
+            width: project.width,
+          }
+        : t
+    );
+
+    // 2. Locate target type
+    const target = updatedTypes.find((t) => t.id === typeId);
+    if (!target) return;
+
+    const nextProject: FontProject = {
+      ...project,
+      types: updatedTypes,
+      activeTypeId: target.id,
+      style: target.name,
+      weight: target.weight,
+      width: target.width,
+      metrics: { ...target.metrics },
+      glyphs: { ...target.glyphs },
+    };
+
+    setProject(nextProject);
+    fontStorage.saveProject(nextProject);
+    setHistory([nextProject]);
+    setHistoryIndex(0);
+    setSelectedPointIds([]);
+    toast({
+      type: 'info',
+      title: `Switched to ${target.name}`,
+      description: `Weight ${target.weight} (${Object.keys(target.glyphs || {}).length} glyphs)`,
+    });
+  };
+
+  const handleAddTypeToFamily = (data: { name: string; weight: number; width: string }) => {
+    if (!project) return;
+
+    const newType: FontTypeStyle = {
+      id: 'type_' + Math.random().toString(36).substring(2, 9),
+      name: data.name,
+      weight: data.weight,
+      width: data.width,
+      metrics: { ...project.metrics },
+      // Copy current glyph contours as starting base for the new weight
+      glyphs: JSON.parse(JSON.stringify(project.glyphs)),
+    };
+
+    const currentTypes = project.types || [];
+    const updatedTypes = [...currentTypes, newType].sort((a, b) => a.weight - b.weight);
+
+    const nextProject: FontProject = {
+      ...project,
+      isFamily: true,
+      types: updatedTypes,
+      activeTypeId: newType.id,
+      style: newType.name,
+      weight: newType.weight,
+      width: newType.width,
+      metrics: newType.metrics,
+      glyphs: newType.glyphs,
+    };
+
+    setProject(nextProject);
+    fontStorage.saveProject(nextProject);
+    setHistory([nextProject]);
+    setHistoryIndex(0);
+    toast({
+      type: 'success',
+      title: `Added ${data.name}`,
+      description: `Created new style in ${project.family} family.`,
+    });
+  };
+
+  const handleDeleteTypeFromFamily = (typeId: string) => {
+    if (!project || !project.types || project.types.length <= 1) return;
+
+    const updatedTypes = project.types.filter((t) => t.id !== typeId);
+    let target = updatedTypes.find((t) => t.id === project.activeTypeId);
+    if (!target) {
+      target = updatedTypes[0];
+    }
+
+    const nextProject: FontProject = {
+      ...project,
+      isFamily: updatedTypes.length > 1,
+      types: updatedTypes,
+      activeTypeId: target.id,
+      style: target.name,
+      weight: target.weight,
+      width: target.width,
+      metrics: target.metrics,
+      glyphs: target.glyphs,
+    };
+
+    setProject(nextProject);
+    fontStorage.saveProject(nextProject);
+    setHistory([nextProject]);
+    setHistoryIndex(0);
+    toast({ type: 'info', title: 'Removed style from family' });
+  };
 
   // Global Keyboard shortcuts
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      // Ignore if user typing in input
       if (['INPUT', 'TEXTAREA', 'SELECT'].includes((e.target as HTMLElement).tagName)) {
         return;
       }
@@ -139,6 +283,12 @@ export const EditorPage: React.FC<EditorPageProps> = ({ fontId, onNavigate }) =>
         case 'p':
           setActiveTool('pen');
           break;
+        case 'b':
+          setActiveTool('brush');
+          break;
+        case 'c':
+          setActiveTool('arc');
+          break;
         case 'l':
           setActiveTool('line');
           break;
@@ -162,21 +312,21 @@ export const EditorPage: React.FC<EditorPageProps> = ({ fontId, onNavigate }) =>
           break;
         case 'delete':
         case 'backspace':
-          handleDeleteSelectedPoint();
+          handleDeleteSelectedPoints();
           break;
         case 'escape':
-          setSelectedPointId(null);
+          setSelectedPointIds([]);
           break;
       }
     };
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [handleSave, handleUndo, handleRedo]);
+  }, [handleSave, handleUndo, handleRedo, selectedPointIds]);
 
   if (!project) {
     return (
-      <div className="h-screen bg-neutral-950 flex items-center justify-center text-xs text-neutral-400">
+      <div className="h-screen bg-neutral-950 flex items-center justify-center text-xs font-mono text-neutral-400">
         Loading font workspace...
       </div>
     );
@@ -193,11 +343,12 @@ export const EditorPage: React.FC<EditorPageProps> = ({ fontId, onNavigate }) =>
     hasCustomPath: false,
   };
 
-  // Find currently selected point across contours
-  let currentSelectedPoint = null;
-  if (selectedPointId && activeGlyph.contours) {
+  // Primary selected point for inspector
+  let currentSelectedPoint: VectorPoint | null = null;
+  if (selectedPointIds.length > 0 && activeGlyph.contours) {
+    const primaryId = selectedPointIds[0];
     for (const contour of activeGlyph.contours) {
-      const pt = contour.points?.find((p) => p.id === selectedPointId);
+      const pt = contour.points?.find((p) => p.id === primaryId);
       if (pt) {
         currentSelectedPoint = pt;
         break;
@@ -205,20 +356,25 @@ export const EditorPage: React.FC<EditorPageProps> = ({ fontId, onNavigate }) =>
     }
   }
 
-  const handleUpdateGlyphContours = (contours: PathContour[]) => {
+  const handleUpdateGlyphContours = (contours: PathContour[], commitHistory: boolean = true) => {
+    const updatedGlyph: GlyphData = {
+      ...activeGlyph,
+      contours,
+      hasCustomPath: true,
+    };
+
     const updatedProject: FontProject = {
       ...project,
       glyphs: {
         ...project.glyphs,
-        [selectedChar]: {
-          ...activeGlyph,
-          contours,
-          hasCustomPath: true,
-        },
+        [selectedChar]: updatedGlyph,
       },
     };
+
     setProject(updatedProject);
-    pushStateToHistory(updatedProject);
+    if (commitHistory) {
+      pushStateToHistory(updatedProject);
+    }
   };
 
   const handleUpdateMetricsBearing = (bearing: { lsb?: number; advanceWidth?: number }) => {
@@ -237,17 +393,19 @@ export const EditorPage: React.FC<EditorPageProps> = ({ fontId, onNavigate }) =>
     pushStateToHistory(updatedProject);
   };
 
-  const handleDeleteSelectedPoint = () => {
-    if (!selectedPointId) return;
+  const handleDeleteSelectedPoints = () => {
+    if (selectedPointIds.length === 0) return;
+    const selectedSet = new Set(selectedPointIds);
+
     const newContours = activeGlyph.contours
       .map((c) => ({
         ...c,
-        points: c.points.filter((p) => p.id !== selectedPointId),
+        points: c.points.filter((p) => !selectedSet.has(p.id)),
       }))
       .filter((c) => c.points.length > 0);
 
-    handleUpdateGlyphContours(newContours);
-    setSelectedPointId(null);
+    handleUpdateGlyphContours(newContours, true);
+    setSelectedPointIds([]);
   };
 
   const handleResetGlyphTemplate = () => {
@@ -267,13 +425,13 @@ export const EditorPage: React.FC<EditorPageProps> = ({ fontId, onNavigate }) =>
     };
     setProject(updatedProject);
     pushStateToHistory(updatedProject);
-    setSelectedPointId(null);
+    setSelectedPointIds([]);
     toast({ type: 'info', title: `Reset ${selectedChar} to standard geometry` });
   };
 
   const handleClearGlyph = () => {
-    handleUpdateGlyphContours([]);
-    setSelectedPointId(null);
+    handleUpdateGlyphContours([], true);
+    setSelectedPointIds([]);
     toast({ type: 'info', title: `Cleared outlines for ${selectedChar}` });
   };
 
@@ -292,7 +450,7 @@ export const EditorPage: React.FC<EditorPageProps> = ({ fontId, onNavigate }) =>
         return p;
       }),
     }));
-    handleUpdateGlyphContours(newContours);
+    handleUpdateGlyphContours(newContours, true);
   };
 
   const handleUpdateFontMetrics = (metrics: Partial<FontMetrics>) => {
@@ -307,9 +465,94 @@ export const EditorPage: React.FC<EditorPageProps> = ({ fontId, onNavigate }) =>
     pushStateToHistory(updatedProject);
   };
 
+  const handleUpdateProjectMeta = (meta: { family?: string; style?: string; weight?: number; width?: string }) => {
+    const updatedProject: FontProject = {
+      ...project,
+      name: `${meta.family || project.family} ${meta.style || project.style}`.trim(),
+      family: meta.family || project.family,
+      style: meta.style || project.style,
+      weight: meta.weight !== undefined ? meta.weight : project.weight,
+      width: meta.width || project.width,
+    };
+    setProject(updatedProject);
+    fontStorage.saveProject(updatedProject);
+    pushStateToHistory(updatedProject);
+    toast({ type: 'success', title: 'Updated Font Properties' });
+  };
+
+  // Performant Arcing on Inspector
+  const handleApplyArcToSelectedPoint = (tension: number) => {
+    if (!currentSelectedPoint) return;
+    const factor = tension / 100;
+
+    const newContours = activeGlyph.contours.map((contour) => {
+      const idx = contour.points.findIndex((p) => p.id === currentSelectedPoint?.id);
+      if (idx < 0) return contour;
+
+      const pts = [...contour.points];
+      const p1 = pts[idx];
+      const nextIdx = (idx + 1) % pts.length;
+      const p2 = pts[nextIdx];
+
+      const dx = p2.x - p1.x;
+      const dy = p2.y - p1.y;
+      const dist = Math.hypot(dx, dy) || 1;
+      const nx = -dy / dist;
+      const ny = dx / dist;
+
+      const bulge = (dist * 0.35) * factor;
+
+      const c1X = Math.round(p1.x + dx * 0.33 + nx * bulge);
+      const c1Y = Math.round(p1.y + dy * 0.33 + ny * bulge);
+      const c2X = Math.round(p1.x + dx * 0.67 + nx * bulge);
+      const c2Y = Math.round(p1.y + dy * 0.67 + ny * bulge);
+
+      const nextIsControl = pts[idx + 1] && pts[idx + 1].type === 'control1';
+      if (nextIsControl) {
+        pts[idx + 1] = { ...pts[idx + 1], x: c1X, y: c1Y };
+        if (pts[idx + 2] && pts[idx + 2].type === 'control2') {
+          pts[idx + 2] = { ...pts[idx + 2], x: c2X, y: c2Y };
+        }
+      } else {
+        const ctrl1: VectorPoint = { id: `pt_arc_${Date.now()}_1`, x: c1X, y: c1Y, type: 'control1' };
+        const ctrl2: VectorPoint = { id: `pt_arc_${Date.now()}_2`, x: c2X, y: c2Y, type: 'control2' };
+        pts.splice(idx + 1, 0, ctrl1, ctrl2);
+      }
+
+      return { ...contour, points: pts };
+    });
+
+    handleUpdateGlyphContours(newContours, true);
+  };
+
+  const handleStraightenSelectedSegment = () => {
+    if (!currentSelectedPoint) return;
+    const newContours = activeGlyph.contours.map((contour) => {
+      const idx = contour.points.findIndex((p) => p.id === currentSelectedPoint?.id);
+      if (idx < 0) return contour;
+
+      const pts = contour.points.filter((p, i) => {
+        if (i === idx + 1 && p.type === 'control1') return false;
+        if (i === idx + 2 && p.type === 'control2') return false;
+        return true;
+      });
+
+      return { ...contour, points: pts };
+    });
+
+    handleUpdateGlyphContours(newContours, true);
+    toast({ type: 'info', title: 'Straightened segment' });
+  };
+
+  const handleUpdateZoomAndPan = (newZoom: number, newPanX: number, newPanY: number) => {
+    setZoom(newZoom);
+    setPanX(newPanX);
+    setPanY(newPanY);
+  };
+
   return (
     <div className="h-screen w-screen bg-neutral-950 text-neutral-100 flex flex-col overflow-hidden font-sans">
-      {/* Small Screen Fallback (Desktop-First Tool as required) */}
+      {/* Small Screen Fallback */}
       <div className="md:hidden fixed inset-0 z-50 bg-neutral-950 flex flex-col items-center justify-center p-8 text-center space-y-4">
         <Monitor className="w-8 h-8 text-neutral-400 stroke-1" />
         <div className="space-y-1">
@@ -317,7 +560,7 @@ export const EditorPage: React.FC<EditorPageProps> = ({ fontId, onNavigate }) =>
             GlyphWorks Editor
           </h2>
           <p className="text-xs text-neutral-400 max-w-xs leading-relaxed">
-            The font editor is designed for larger screens.
+            The vector typography workspace is optimized for larger displays.
           </p>
         </div>
         <Button
@@ -325,18 +568,17 @@ export const EditorPage: React.FC<EditorPageProps> = ({ fontId, onNavigate }) =>
           variant="outline"
           onClick={() => onNavigate('/dashboard')}
         >
-          Return to Dashboard
+          Return to Projects
         </Button>
       </div>
 
-      {/* Editor Top Bar */}
+      {/* Editor Top Bar with Family Types Switcher */}
       <EditorTopBar
         project={project}
-        onUpdateProjectName={(name) => {
-          const updated = { ...project, name, family: name };
-          setProject(updated);
-          pushStateToHistory(updated);
-        }}
+        onUpdateProjectMeta={handleUpdateProjectMeta}
+        onSwitchType={handleSwitchType}
+        onAddTypeToFamily={handleAddTypeToFamily}
+        onDeleteTypeFromFamily={handleDeleteTypeFromFamily}
         onSave={handleSave}
         onExport={() => setIsExportOpen(true)}
         onTogglePreview={() => setIsPreviewOpen(!isPreviewOpen)}
@@ -344,8 +586,8 @@ export const EditorPage: React.FC<EditorPageProps> = ({ fontId, onNavigate }) =>
         onBackToDashboard={() => onNavigate('/dashboard')}
         isDirty={isDirty}
         zoom={zoom}
-        onZoomIn={() => setZoom((z) => Math.min(2.5, z * 1.25))}
-        onZoomOut={() => setZoom((z) => Math.max(0.15, z * 0.8))}
+        onZoomIn={() => setZoom((z) => Math.min(6.0, z * 1.25))}
+        onZoomOut={() => setZoom((z) => Math.max(0.1, z * 0.8))}
         onResetZoom={() => {
           setZoom(0.42);
           setPanX(0);
@@ -366,8 +608,10 @@ export const EditorPage: React.FC<EditorPageProps> = ({ fontId, onNavigate }) =>
         <EditorToolbar
           activeTool={activeTool}
           onSelectTool={(t) => setActiveTool(t)}
-          onDeleteSelectedPoint={handleDeleteSelectedPoint}
-          hasSelectedPoint={!!selectedPointId}
+          brushSize={brushSize}
+          onChangeBrushSize={(sz) => setBrushSize(sz)}
+          onDeleteSelectedPoints={handleDeleteSelectedPoints}
+          hasSelectedPoints={selectedPointIds.length > 0}
           onClearGlyph={handleClearGlyph}
           onResetGlyphTemplate={handleResetGlyphTemplate}
         />
@@ -376,6 +620,7 @@ export const EditorPage: React.FC<EditorPageProps> = ({ fontId, onNavigate }) =>
           glyph={activeGlyph}
           metrics={project.metrics}
           activeTool={activeTool}
+          brushSize={brushSize}
           zoom={zoom}
           panX={panX}
           panY={panY}
@@ -383,10 +628,11 @@ export const EditorPage: React.FC<EditorPageProps> = ({ fontId, onNavigate }) =>
             setPanX(px);
             setPanY(py);
           }}
+          onUpdateZoomAndPan={handleUpdateZoomAndPan}
           showGrid={showGrid}
           snapToGrid={snapToGrid}
-          selectedPointId={selectedPointId}
-          onSelectPoint={(id) => setSelectedPointId(id)}
+          selectedPointIds={selectedPointIds}
+          onSelectPoints={(ids) => setSelectedPointIds(ids)}
           onUpdateGlyphContours={handleUpdateGlyphContours}
           onUpdateMetricsBearing={handleUpdateMetricsBearing}
         />
@@ -395,6 +641,7 @@ export const EditorPage: React.FC<EditorPageProps> = ({ fontId, onNavigate }) =>
           glyph={activeGlyph}
           metrics={project.metrics}
           selectedPoint={currentSelectedPoint}
+          selectedPointCount={selectedPointIds.length}
           onUpdateGlyphMetrics={handleUpdateMetricsBearing}
           onUpdatePointCoords={handleUpdatePointCoords}
           onUpdateFontMetrics={handleUpdateFontMetrics}
@@ -405,12 +652,14 @@ export const EditorPage: React.FC<EditorPageProps> = ({ fontId, onNavigate }) =>
               }
               return c;
             });
-            handleUpdateGlyphContours(newContours);
+            handleUpdateGlyphContours(newContours, true);
           }}
           onDeleteContour={(contourId) => {
             const newContours = activeGlyph.contours.filter((c) => c.id !== contourId);
-            handleUpdateGlyphContours(newContours);
+            handleUpdateGlyphContours(newContours, true);
           }}
+          onApplyArcToSelectedPoint={handleApplyArcToSelectedPoint}
+          onStraightenSelectedSegment={handleStraightenSelectedSegment}
         />
       </div>
 
@@ -420,7 +669,7 @@ export const EditorPage: React.FC<EditorPageProps> = ({ fontId, onNavigate }) =>
         selectedChar={selectedChar}
         onSelectChar={(char) => {
           setSelectedChar(char);
-          setSelectedPointId(null);
+          setSelectedPointIds([]);
         }}
       />
 

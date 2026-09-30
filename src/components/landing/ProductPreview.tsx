@@ -6,9 +6,11 @@ import {
   Square, 
   Circle, 
   Minus,
-  Maximize2,
-  ZoomIn,
-  Sliders
+  Paintbrush,
+  Spline,
+  Hand,
+  Sliders,
+  Check
 } from 'lucide-react';
 
 export const ProductPreview: React.FC = () => {
@@ -16,47 +18,55 @@ export const ProductPreview: React.FC = () => {
   const [activeTool, setActiveTool] = useState('select');
   const [showGrid, setShowGrid] = useState(true);
 
-  const sampleGlyphs = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'O', 'T', 'X'];
+  const sampleGlyphs = ['A', 'B', 'G', 'R', 'S', 'Q', 'a', '&', '8'];
 
   return (
-    <div className="w-full border border-neutral-800 bg-neutral-900/60 shadow-2xl overflow-hidden text-neutral-100 flex flex-col">
+    <div className="w-full border border-neutral-800 bg-neutral-900/60 shadow-2xl overflow-hidden text-neutral-100 flex flex-col rounded-xs">
       {/* Mini App Chrome */}
-      <div className="h-9 border-b border-neutral-800 bg-neutral-900 px-3 flex items-center justify-between text-xs">
-        <div className="flex items-center gap-2">
+      <div className="h-10 border-b border-neutral-800 bg-neutral-950 px-4 flex items-center justify-between text-xs">
+        <div className="flex items-center gap-3">
           <div className="flex gap-1.5 mr-2">
-            <span className="w-2.5 h-2.5 rounded-full bg-neutral-700/60" />
-            <span className="w-2.5 h-2.5 rounded-full bg-neutral-700/60" />
-            <span className="w-2.5 h-2.5 rounded-full bg-neutral-700/60" />
+            <span className="w-2.5 h-2.5 rounded-full bg-neutral-800" />
+            <span className="w-2.5 h-2.5 rounded-full bg-neutral-800" />
+            <span className="w-2.5 h-2.5 rounded-full bg-neutral-800" />
           </div>
-          <span className="font-mono text-neutral-400">Untitled Font</span>
-          <span className="text-neutral-600">·</span>
-          <span className="text-neutral-500 font-mono text-[11px]">Glyph: {activeGlyph} (U+00{activeGlyph.charCodeAt(0).toString(16).toUpperCase()})</span>
+          <span className="font-mono text-neutral-200 font-semibold">Inter Display</span>
+          <span className="text-[10px] bg-neutral-800 text-neutral-400 px-2 py-0.5 rounded-full font-mono">
+            Family: 8 Styles
+          </span>
+          <span className="text-neutral-700">·</span>
+          <span className="text-neutral-400 font-mono text-[11px]">
+            Glyph: {activeGlyph} (U+00{activeGlyph.charCodeAt(0).toString(16).toUpperCase()})
+          </span>
         </div>
         <div className="flex items-center gap-3 text-neutral-400 text-[11px]">
           <span className="font-mono text-neutral-400">1000 UPM</span>
           <span className="text-neutral-700">|</span>
-          <span className="text-neutral-300 font-medium">Export TTF</span>
+          <span className="text-sky-400 font-mono font-medium flex items-center gap-1">
+            <Check className="w-3 h-3" /> IndexedDB Active
+          </span>
         </div>
       </div>
 
       {/* Editor Body */}
       <div className="flex h-96">
-        {/* Mini Left Toolbar */}
-        <div className="w-10 border-r border-neutral-800 bg-neutral-950 flex flex-col items-center py-2 gap-1 shrink-0">
+        {/* Mini Left Toolbar with all new tools */}
+        <div className="w-11 border-r border-neutral-800 bg-neutral-950 flex flex-col items-center py-2.5 gap-1.5 shrink-0">
           {[
-            { id: 'select', icon: <MousePointer2 className="w-3.5 h-3.5" /> },
-            { id: 'node', icon: <Waypoints className="w-3.5 h-3.5" /> },
-            { id: 'pen', icon: <PenTool className="w-3.5 h-3.5" /> },
-            { id: 'line', icon: <Minus className="w-3.5 h-3.5" /> },
-            { id: 'rect', icon: <Square className="w-3.5 h-3.5" /> },
-            { id: 'ellipse', icon: <Circle className="w-3.5 h-3.5" /> },
+            { id: 'select', title: 'Select (V)', icon: <MousePointer2 className="w-3.5 h-3.5" /> },
+            { id: 'node', title: 'Direct Node (A)', icon: <Waypoints className="w-3.5 h-3.5" /> },
+            { id: 'pen', title: 'Pen Tool (P)', icon: <PenTool className="w-3.5 h-3.5" /> },
+            { id: 'brush', title: 'Free Pen Brush (B)', icon: <Paintbrush className="w-3.5 h-3.5" /> },
+            { id: 'arc', title: 'Arc Curvature (C)', icon: <Spline className="w-3.5 h-3.5" /> },
+            { id: 'pan', title: 'Pan Canvas (H)', icon: <Hand className="w-3.5 h-3.5" /> },
           ].map((t) => (
             <button
               key={t.id}
               onClick={() => setActiveTool(t.id)}
-              className={`w-7 h-7 flex items-center justify-center transition-colors ${
+              title={t.title}
+              className={`w-7 h-7 flex items-center justify-center transition-colors rounded-xs cursor-pointer ${
                 activeTool === t.id
-                  ? 'bg-neutral-800 text-neutral-100'
+                  ? 'bg-neutral-800 text-neutral-100 shadow-sm border border-neutral-700'
                   : 'text-neutral-500 hover:text-neutral-300'
               }`}
             >
@@ -66,9 +76,9 @@ export const ProductPreview: React.FC = () => {
           <div className="w-5 h-px bg-neutral-800 my-1.5" />
           <button
             onClick={() => setShowGrid(!showGrid)}
-            title="Toggle Grid"
-            className={`w-7 h-7 flex items-center justify-center text-xs font-mono ${
-              showGrid ? 'text-neutral-200' : 'text-neutral-600'
+            title="Toggle Grid (G)"
+            className={`w-7 h-7 flex items-center justify-center text-xs font-mono rounded-xs cursor-pointer ${
+              showGrid ? 'text-neutral-200 bg-neutral-900' : 'text-neutral-600'
             }`}
           >
             #
@@ -80,7 +90,7 @@ export const ProductPreview: React.FC = () => {
           {/* Subtle grid */}
           {showGrid && (
             <div
-              className="absolute inset-0 opacity-[0.07] pointer-events-none"
+              className="absolute inset-0 opacity-[0.06] pointer-events-none"
               style={{
                 backgroundImage:
                   'linear-gradient(to right, #ffffff 1px, transparent 1px), linear-gradient(to bottom, #ffffff 1px, transparent 1px)',
@@ -90,7 +100,7 @@ export const ProductPreview: React.FC = () => {
           )}
 
           {/* SVG Vector Canvas Display */}
-          <div className="relative w-72 h-72 flex items-center justify-center">
+          <div className="relative w-80 h-80 flex items-center justify-center">
             {/* Typographic Guide lines */}
             <div className="absolute inset-x-0 top-[18%] border-b border-dashed border-neutral-700/60 pointer-events-none">
               <span className="absolute right-1 -top-3 text-[9px] font-mono text-neutral-500">Ascender (800)</span>
@@ -102,7 +112,7 @@ export const ProductPreview: React.FC = () => {
               <span className="absolute right-1 -top-3 text-[9px] font-mono text-neutral-500">x-Height (500)</span>
             </div>
             <div className="absolute inset-x-0 top-[76%] border-b border-neutral-500/80 pointer-events-none">
-              <span className="absolute right-1 -top-3 text-[9px] font-mono text-neutral-300">Baseline (0)</span>
+              <span className="absolute right-1 -top-3 text-[9px] font-mono text-neutral-300 font-semibold">Baseline (0)</span>
             </div>
             <div className="absolute inset-x-0 top-[90%] border-b border-dashed border-neutral-700/60 pointer-events-none">
               <span className="absolute right-1 -top-3 text-[9px] font-mono text-neutral-500">Descender (-200)</span>
@@ -120,7 +130,7 @@ export const ProductPreview: React.FC = () => {
             <svg
               viewBox="0 0 700 900"
               className="w-full h-full text-neutral-100 overflow-visible"
-              style={{ transform: 'scale(1, -1)' }} // Font coordinates standard (baseline y=0 up)
+              style={{ transform: 'scale(1, -1)' }}
             >
               {activeGlyph === 'A' ? (
                 <>
@@ -128,21 +138,25 @@ export const ProductPreview: React.FC = () => {
                     points="60,180 320,780 380,780 640,180 540,180 460,370 240,370 160,180"
                     fill="rgba(255,255,255,0.06)"
                     stroke="#ffffff"
-                    strokeWidth="4"
+                    strokeWidth="3.5"
                   />
                   <polygon
                     points="270,440 430,440 350,630"
                     fill="#0a0a0a"
                     stroke="#ffffff"
-                    strokeWidth="4"
+                    strokeWidth="3.5"
                   />
+                  {/* Bezier handle simulation */}
+                  <line x1="320" y1="780" x2="280" y2="820" stroke="rgba(56, 189, 248, 0.6)" strokeWidth="2" strokeDasharray="3,3" />
+                  <circle cx="280" cy="820" r="4" fill="#38bdf8" />
+
                   {/* Anchor point markers */}
                   {[[60,180],[320,780],[380,780],[640,180],[540,180],[460,370],[240,370],[160,180],[270,440],[430,440],[350,630]].map(([x, y], idx) => (
                     <circle
                       key={idx}
                       cx={x}
                       cy={y}
-                      r="7"
+                      r="6"
                       fill={idx === 1 ? '#38bdf8' : '#ffffff'}
                       stroke="#000000"
                       strokeWidth="2"
@@ -164,14 +178,27 @@ export const ProductPreview: React.FC = () => {
           </div>
         </div>
 
-        {/* Mini Right Inspector */}
-        <div className="w-48 border-l border-neutral-800 bg-neutral-950 p-3 flex flex-col justify-between text-xs">
-          <div className="space-y-3">
-            <div className="pb-2 border-b border-neutral-800/80">
-              <span className="text-[10px] font-mono uppercase tracking-wider text-neutral-500">Glyph Info</span>
+        {/* Mini Right Inspector with Arcing & Curvature */}
+        <div className="w-52 border-l border-neutral-800 bg-neutral-950 p-3.5 flex flex-col justify-between text-xs">
+          <div className="space-y-4">
+            <div className="pb-2.5 border-b border-neutral-800/80">
+              <span className="text-[10px] font-mono uppercase tracking-wider text-neutral-500">Active Glyph</span>
               <div className="mt-1 flex items-baseline justify-between">
-                <span className="text-sm font-semibold">{activeGlyph}</span>
+                <span className="text-base font-semibold text-neutral-100">{activeGlyph}</span>
                 <span className="font-mono text-[10px] text-neutral-400">U+00{activeGlyph.charCodeAt(0).toString(16).toUpperCase()}</span>
+              </div>
+            </div>
+
+            {/* Arcing Panel Preview */}
+            <div className="p-2 bg-neutral-900/60 border border-neutral-850 rounded-xs space-y-1.5">
+              <div className="flex items-center justify-between text-[10px] font-mono">
+                <span className="text-neutral-400 flex items-center gap-1">
+                  <Spline className="w-3 h-3 text-sky-400" /> Arc Tension
+                </span>
+                <span className="text-sky-400 font-semibold">45%</span>
+              </div>
+              <div className="w-full bg-neutral-800 h-1 rounded-full overflow-hidden">
+                <div className="bg-sky-400 h-full w-[45%]" />
               </div>
             </div>
 
@@ -182,7 +209,7 @@ export const ProductPreview: React.FC = () => {
               </div>
               <div className="flex justify-between items-center text-neutral-400">
                 <span>Left Bearing</span>
-                <span className="font-mono text-neutral-200">50</span>
+                <span className="font-mono text-neutral-200">40</span>
               </div>
               <div className="flex justify-between items-center text-neutral-400">
                 <span>Right Bearing</span>
@@ -190,11 +217,7 @@ export const ProductPreview: React.FC = () => {
               </div>
               <div className="flex justify-between items-center text-neutral-400">
                 <span>Contours</span>
-                <span className="font-mono text-neutral-200">2</span>
-              </div>
-              <div className="flex justify-between items-center text-neutral-400">
-                <span>Points</span>
-                <span className="font-mono text-neutral-200">11</span>
+                <span className="font-mono text-neutral-200">2 closed</span>
               </div>
             </div>
           </div>
@@ -207,12 +230,12 @@ export const ProductPreview: React.FC = () => {
       </div>
 
       {/* Mini Bottom Glyph Strip */}
-      <div className="h-10 border-t border-neutral-800 bg-neutral-900 px-2 flex items-center gap-1 overflow-x-auto">
+      <div className="h-10 border-t border-neutral-800 bg-neutral-900 px-3 flex items-center gap-1.5 overflow-x-auto">
         {sampleGlyphs.map((glyph) => (
           <button
             key={glyph}
             onClick={() => setActiveGlyph(glyph)}
-            className={`w-7 h-7 flex items-center justify-center font-mono text-xs transition-colors shrink-0 ${
+            className={`w-7 h-7 flex items-center justify-center font-mono text-xs transition-colors shrink-0 rounded-xs cursor-pointer ${
               activeGlyph === glyph
                 ? 'bg-neutral-100 text-neutral-950 font-semibold'
                 : 'text-neutral-400 hover:text-neutral-100 hover:bg-neutral-800'
