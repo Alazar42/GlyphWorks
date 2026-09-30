@@ -244,6 +244,17 @@ export const fontStorage = {
     return [...projectsCache];
   },
 
+  /** True once IndexedDB has finished loading into the in-memory cache */
+  isReady(): boolean {
+    return isInitialized;
+  },
+
+  /** Resolves when IndexedDB cache is fully loaded */
+  awaitReady(): Promise<FontProject[]> {
+    if (isInitialized) return Promise.resolve([...projectsCache]);
+    return initPromise || initFontStorage();
+  },
+
   getProjectById(id: string): FontProject | null {
     return projectsCache.find((p) => p.id === id) || null;
   },

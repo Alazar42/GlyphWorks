@@ -260,8 +260,6 @@ export const GlyphCanvas: React.FC<GlyphCanvasProps> = ({
     const el = containerRef.current;
     if (!el) return;
 
-    let rafId: number | null = null;
-
     const handleCanvasWheel = (e: WheelEvent) => {
       e.preventDefault();
 
@@ -273,7 +271,12 @@ export const GlyphCanvas: React.FC<GlyphCanvasProps> = ({
 
       // Trackpad 2-finger pan (no modifier key, deltaX dominant or small deltaY)
       if (!e.ctrlKey && !e.metaKey && (Math.abs(e.deltaX) > Math.abs(e.deltaY) || Math.abs(e.deltaY) < 30)) {
-        curOnUpdatePan(curPanX - e.deltaX * 0.8, curPanY - e.deltaY * 0.8);
+        const newPanX = curPanX - e.deltaX * 0.8;
+        const newPanY = curPanY - e.deltaY * 0.8;
+        // Immediately update ref so next event uses fresh values (not stale React state)
+        zoomPanStateRef.current.panX = newPanX;
+        zoomPanStateRef.current.panY = newPanY;
+        curOnUpdatePan(newPanX, newPanY);
         return;
       }
 
@@ -285,21 +288,21 @@ export const GlyphCanvas: React.FC<GlyphCanvasProps> = ({
 
       const zoomFactor = e.deltaY < 0 ? 1.12 : 1 / 1.12;
       const newZoom = Math.min(8.0, Math.max(0.08, curZoom * zoomFactor));
+      const newPanX = Math.round(mouseX - rect.width / 2 - fontX * newZoom);
+      const newPanY = Math.round(mouseY - rect.height / 2 - (curMetrics.unitsPerEm * 0.25 - fontY) * newZoom);
 
-      const newPanX = mouseX - rect.width / 2 - fontX * newZoom;
-      const newPanY = mouseY - rect.height / 2 - (curMetrics.unitsPerEm * 0.25 - fontY) * newZoom;
+      // Immediately update ref so rapid successive wheel events accumulate correctly
+      // without waiting for React to re-render and flush new state back into the ref
+      zoomPanStateRef.current.zoom = newZoom;
+      zoomPanStateRef.current.panX = newPanX;
+      zoomPanStateRef.current.panY = newPanY;
 
-      if (rafId !== null) cancelAnimationFrame(rafId);
-      rafId = requestAnimationFrame(() => {
-        curOnUpdateZoomAndPan(newZoom, Math.round(newPanX), Math.round(newPanY));
-        rafId = null;
-      });
+      curOnUpdateZoomAndPan(newZoom, newPanX, newPanY);
     };
 
     el.addEventListener('wheel', handleCanvasWheel, { passive: false });
     return () => {
       el.removeEventListener('wheel', handleCanvasWheel);
-      if (rafId !== null) cancelAnimationFrame(rafId);
     };
   }, []);
 

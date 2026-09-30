@@ -24,6 +24,7 @@ interface EditorPageProps {
 
 export const EditorPage: React.FC<EditorPageProps> = ({ fontId, onNavigate }) => {
   const [project, setProject] = useState<FontProject | null>(null);
+  const [storageReady, setStorageReady] = useState<boolean>(() => fontStorage.isReady());
   const [selectedChar, setSelectedChar] = useState<string>('A');
   const [activeTool, setActiveTool] = useState<EditorTool>('select');
   const [brushSize, setBrushSize] = useState<number>(24);
@@ -48,8 +49,22 @@ export const EditorPage: React.FC<EditorPageProps> = ({ fontId, onNavigate }) =>
 
   const { toast } = useToast();
 
-  // Load project on mount or ID change
+  // Wait for IndexedDB to initialize before loading project (avoids false 404 on hard reload)
   useEffect(() => {
+    if (fontStorage.isReady()) {
+      setStorageReady(true);
+      return;
+    }
+    let cancelled = false;
+    fontStorage.awaitReady().then(() => {
+      if (!cancelled) setStorageReady(true);
+    });
+    return () => { cancelled = true; };
+  }, []);
+
+  // Load project on mount or ID change — but only once storage is ready
+  useEffect(() => {
+    if (!storageReady) return;
     const loaded = fontStorage.getProjectById(fontId);
     if (loaded) {
       // Ensure types array is initialized
@@ -95,7 +110,7 @@ export const EditorPage: React.FC<EditorPageProps> = ({ fontId, onNavigate }) =>
       toast({ type: 'error', title: 'Font not found', description: 'Returning to workspace' });
       onNavigate('/dashboard');
     }
-  }, [fontId]);
+  }, [fontId, storageReady]);
 
   // Push new state to history (capped at 5 for mega-fonts, 25 for normal fonts to conserve memory)
   const pushStateToHistory = useCallback((newProject: FontProject) => {
@@ -412,8 +427,9 @@ export const EditorPage: React.FC<EditorPageProps> = ({ fontId, onNavigate }) =>
 
   if (!project) {
     return (
-      <div className="h-screen bg-neutral-950 flex items-center justify-center text-xs font-mono text-neutral-400">
-        Loading font workspace...
+      <div className="h-screen bg-neutral-950 flex flex-col items-center justify-center gap-3 text-xs font-mono text-neutral-400">
+        <div className="w-6 h-6 border-2 border-neutral-700 border-t-violet-500 rounded-full animate-spin" />
+        <span>{storageReady ? 'Loading font workspace...' : 'Opening storage…'}</span>
       </div>
     );
   }
