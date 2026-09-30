@@ -248,33 +248,73 @@ export const GlyphCanvas: React.FC<GlyphCanvasProps> = ({
     };
   };
 
-  // Canvas Zoom centered at mouse cursor
-  const handleWheel = (e: React.WheelEvent) => {
-    e.preventDefault();
-    if (!containerRef.current) return;
+  // Keep latest pan, zoom and metrics references for active wheel listener
+  const zoomPanStateRef = useRef({
+    panX,
+    panY,
+    zoom,
+    metrics,
+    screenToFont,
+    onUpdatePan,
+    onUpdateZoomAndPan,
+  });
 
-    const rect = containerRef.current.getBoundingClientRect();
-    const mouseX = e.clientX - rect.left;
-    const mouseY = e.clientY - rect.top;
+  useEffect(() => {
+    zoomPanStateRef.current = {
+      panX,
+      panY,
+      zoom,
+      metrics,
+      screenToFont,
+      onUpdatePan,
+      onUpdateZoomAndPan,
+    };
+  });
 
-    // Trackpad pan or wheel scroll without meta/ctrl
-    if (!e.ctrlKey && !e.metaKey && (Math.abs(e.deltaX) > Math.abs(e.deltaY) || Math.abs(e.deltaY) < 30)) {
-      // Smooth 2D panning
-      onUpdatePan(panX - e.deltaX * 0.8, panY - e.deltaY * 0.8);
-      return;
-    }
+  // Canvas Zoom & Pan with native non-passive listener to permit e.preventDefault()
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
 
-    // Focal mouse zoom anchored to cursor font position
-    const fontPos = screenToFont(e.clientX, e.clientY, true);
+    const handleCanvasWheel = (e: WheelEvent) => {
+      e.preventDefault();
 
-    const zoomFactor = e.deltaY < 0 ? 1.15 : (1 / 1.15);
-    const newZoom = Math.min(8.0, Math.max(0.08, zoom * zoomFactor));
+      const {
+        panX: curPanX,
+        panY: curPanY,
+        zoom: curZoom,
+        metrics: curMetrics,
+        screenToFont: curScreenToFont,
+        onUpdatePan: curOnUpdatePan,
+        onUpdateZoomAndPan: curOnUpdateZoomAndPan,
+      } = zoomPanStateRef.current;
 
-    const newPanX = mouseX - rect.width / 2 - fontPos.x * newZoom;
-    const newPanY = mouseY - rect.height / 2 - (metrics.unitsPerEm * 0.25 - fontPos.y) * newZoom;
+      const rect = el.getBoundingClientRect();
+      const mouseX = e.clientX - rect.left;
+      const mouseY = e.clientY - rect.top;
 
-    onUpdateZoomAndPan(newZoom, Math.round(newPanX), Math.round(newPanY));
-  };
+      // Trackpad pan or wheel scroll without meta/ctrl
+      if (!e.ctrlKey && !e.metaKey && (Math.abs(e.deltaX) > Math.abs(e.deltaY) || Math.abs(e.deltaY) < 30)) {
+        curOnUpdatePan(curPanX - e.deltaX * 0.8, curPanY - e.deltaY * 0.8);
+        return;
+      }
+
+      // Focal mouse zoom anchored to cursor font position
+      const fontPos = curScreenToFont(e.clientX, e.clientY, true);
+      const zoomFactor = e.deltaY < 0 ? 1.15 : 1 / 1.15;
+      const newZoom = Math.min(8.0, Math.max(0.08, curZoom * zoomFactor));
+
+      const newPanX = mouseX - rect.width / 2 - fontPos.x * newZoom;
+      const newPanY = mouseY - rect.height / 2 - (curMetrics.unitsPerEm * 0.25 - fontPos.y) * newZoom;
+
+      curOnUpdateZoomAndPan(newZoom, Math.round(newPanX), Math.round(newPanY));
+    };
+
+    el.addEventListener('wheel', handleCanvasWheel, { passive: false });
+    return () => {
+      el.removeEventListener('wheel', handleCanvasWheel);
+    };
+  }, []);
 
   // Canvas Mouse Down
   const handleMouseDown = (e: React.MouseEvent) => {
@@ -711,7 +751,6 @@ export const GlyphCanvas: React.FC<GlyphCanvasProps> = ({
       onMouseDown={handleMouseDown}
       onMouseMove={handleMouseMove}
       onMouseUp={handleMouseUp}
-      onWheel={handleWheel}
       className={`relative flex-1 h-full bg-neutral-950 overflow-hidden select-none ${
         isSpacePressed || activeTool === 'pan' || isDraggingCanvas
           ? 'cursor-grab active:cursor-grabbing'
