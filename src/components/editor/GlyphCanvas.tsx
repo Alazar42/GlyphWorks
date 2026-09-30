@@ -886,13 +886,13 @@ export const GlyphCanvas: React.FC<GlyphCanvasProps> = ({
           )}
 
           {/* Node handles and connecting lines for bezier control points */}
-          {glyph.contours.map((contour) => {
+          {glyph.contours.map((contour, cIdx) => {
             return contour.points.map((pt, index) => {
               if (pt.type === 'control1' || pt.type === 'control2') {
                 const prev = contour.points[index - 1] || contour.points[contour.points.length - 1];
                 return (
                   <line
-                    key={`handle-line-${pt.id}`}
+                    key={`handle-line-${contour.id || cIdx}-${pt.id}-${index}`}
                     x1={prev.x}
                     y1={prev.y}
                     x2={pt.x}
@@ -963,15 +963,15 @@ export const GlyphCanvas: React.FC<GlyphCanvasProps> = ({
 
       {/* Interactive Anchor / Node Point Overlays */}
       <div className="absolute inset-0 pointer-events-none">
-        {glyph.contours.map((contour) =>
-          contour.points.map((pt) => {
+        {glyph.contours.map((contour, cIdx) =>
+          contour.points.map((pt, pIdx) => {
             const screen = fontToScreen(pt.x, pt.y);
             const isSelected = selectedSet.has(pt.id);
             const isControl = pt.type === 'control1' || pt.type === 'control2';
 
             return (
               <div
-                key={pt.id}
+                key={`pt-overlay-${contour.id || cIdx}-${pt.id}-${pIdx}`}
                 onMouseDown={(e) => handlePointMouseDown(e, pt.id)}
                 className={`absolute pointer-events-auto transform -translate-x-1/2 -translate-y-1/2 transition-transform cursor-pointer ${
                   isControl

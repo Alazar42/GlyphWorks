@@ -355,105 +355,62 @@ export function convertCommandsToContours(commands: any[], glyphIndex = 0): Path
   const roundCoord = (n: number) => Math.round(n * 100) / 100;
   const contours: PathContour[] = [];
   let currentContourPoints: VectorPoint[] = [];
+  let contourIndex = 0;
+  let pointSeq = 0;
+
+  const pushPoint = (x: number, y: number, type: 'onCurve' | 'control1' | 'control2') => {
+    pointSeq++;
+    currentContourPoints.push({
+      id: `pt_${glyphIndex}_${contourIndex}_${pointSeq}`,
+      x: roundCoord(x),
+      y: roundCoord(y),
+      type,
+    });
+  };
+
+  const finishContour = () => {
+    if (currentContourPoints.length === 0) return;
+    const first = currentContourPoints[0];
+    const last = currentContourPoints[currentContourPoints.length - 1];
+    if (
+      currentContourPoints.length > 1 &&
+      last.type === 'onCurve' &&
+      last.x === first.x &&
+      last.y === first.y
+    ) {
+      currentContourPoints.pop();
+    }
+
+    if (currentContourPoints.length > 0) {
+      contours.push({
+        id: `cnt_${glyphIndex}_${contourIndex}`,
+        closed: true,
+        points: currentContourPoints,
+      });
+      contourIndex++;
+      currentContourPoints = [];
+    }
+  };
 
   for (const cmd of commands) {
     if (cmd.type === 'M') {
-      if (currentContourPoints.length > 0) {
-        const first = currentContourPoints[0];
-        const last = currentContourPoints[currentContourPoints.length - 1];
-        if (
-          currentContourPoints.length > 1 &&
-          last.type === 'onCurve' &&
-          last.x === first.x &&
-          last.y === first.y
-        ) {
-          currentContourPoints.pop();
-        }
-
-        contours.push({
-          id: `cnt_${glyphIndex}_${contours.length}`,
-          closed: true,
-          points: currentContourPoints,
-        });
-        currentContourPoints = [];
-      }
-
-      currentContourPoints.push({
-        id: `pt_${glyphIndex}_${contours.length}_${currentContourPoints.length}`,
-        x: roundCoord(cmd.x),
-        y: roundCoord(cmd.y),
-        type: 'onCurve',
-      });
+      finishContour();
+      pushPoint(cmd.x, cmd.y, 'onCurve');
     } else if (cmd.type === 'L') {
-      currentContourPoints.push({
-        id: `pt_${glyphIndex}_${contours.length}_${currentContourPoints.length}`,
-        x: roundCoord(cmd.x),
-        y: roundCoord(cmd.y),
-        type: 'onCurve',
-      });
+      pushPoint(cmd.x, cmd.y, 'onCurve');
     } else if (cmd.type === 'Q') {
-      currentContourPoints.push({
-        id: `pt_${glyphIndex}_${contours.length}_${currentContourPoints.length}`,
-        x: roundCoord(cmd.x1),
-        y: roundCoord(cmd.y1),
-        type: 'control1',
-      });
-      currentContourPoints.push({
-        id: `pt_${glyphIndex}_${contours.length}_${currentContourPoints.length + 1}`,
-        x: roundCoord(cmd.x),
-        y: roundCoord(cmd.y),
-        type: 'onCurve',
-      });
+      pushPoint(cmd.x1, cmd.y1, 'control1');
+      pushPoint(cmd.x, cmd.y, 'onCurve');
     } else if (cmd.type === 'C') {
-      currentContourPoints.push({
-        id: `pt_${glyphIndex}_${contours.length}_${currentContourPoints.length}`,
-        x: roundCoord(cmd.x1),
-        y: roundCoord(cmd.y1),
-        type: 'control1',
-      });
-      currentContourPoints.push({
-        id: `pt_${glyphIndex}_${contours.length}_${currentContourPoints.length + 1}`,
-        x: roundCoord(cmd.x2),
-        y: roundCoord(cmd.y2),
-        type: 'control2',
-      });
-      currentContourPoints.push({
-        id: `pt_${glyphIndex}_${contours.length}_${currentContourPoints.length + 2}`,
-        x: roundCoord(cmd.x),
-        y: roundCoord(cmd.y),
-        type: 'onCurve',
-      });
+      pushPoint(cmd.x1, cmd.y1, 'control1');
+      pushPoint(cmd.x2, cmd.y2, 'control2');
+      pushPoint(cmd.x, cmd.y, 'onCurve');
     } else if (cmd.type === 'Z') {
-      if (currentContourPoints.length > 0) {
-        const first = currentContourPoints[0];
-        const last = currentContourPoints[currentContourPoints.length - 1];
-        if (
-          currentContourPoints.length > 1 &&
-          last.type === 'onCurve' &&
-          last.x === first.x &&
-          last.y === first.y
-        ) {
-          currentContourPoints.pop();
-        }
-
-        contours.push({
-          id: `cnt_${glyphIndex}_${contours.length}`,
-          closed: true,
-          points: currentContourPoints,
-        });
-        currentContourPoints = [];
-      }
+      finishContour();
     }
   }
 
-  if (currentContourPoints.length > 0) {
-    contours.push({
-      id: `cnt_${glyphIndex}_${contours.length}`,
-      closed: true,
-      points: currentContourPoints,
-    });
-  }
-
+  finishContour();
   return contours;
 }
 

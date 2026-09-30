@@ -349,16 +349,19 @@ export const EditorPage: React.FC<EditorPageProps> = ({ fontId, onNavigate }) =>
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [handleSave, handleUndo, handleRedo, selectedPointIds]);
 
-  if (!project) {
-    return (
-      <div className="h-screen bg-neutral-950 flex items-center justify-center text-xs font-mono text-neutral-400">
-        Loading font workspace...
-      </div>
-    );
-  }
-
   // Active glyph: with lazy on-demand contour extraction if not yet extracted for mega-fonts
   const activeGlyph: GlyphData = useMemo(() => {
+    if (!project) {
+      return {
+        unicode: selectedChar.codePointAt(0) || 65,
+        name: `uni${(selectedChar.codePointAt(0) || 65).toString(16).toUpperCase()}`,
+        char: selectedChar,
+        advanceWidth: 600,
+        leftSideBearing: 40,
+        contours: [],
+        hasCustomPath: false,
+      };
+    }
     const existing = project.glyphs[selectedChar];
     if (existing) {
       if ((!existing.contours || existing.contours.length === 0) && !existing.hasCustomPath) {
@@ -366,6 +369,32 @@ export const EditorPage: React.FC<EditorPageProps> = ({ fontId, onNavigate }) =>
         if (onDemand && onDemand.length > 0) {
           existing.contours = onDemand;
           existing.hasCustomPath = true;
+        }
+      }
+      // Self-heal: ensure all point IDs in active glyph are strictly unique
+      if (existing.contours && existing.contours.length > 0) {
+        const seenIds = new Set<string>();
+        let hasDuplicate = false;
+        for (const c of existing.contours) {
+          if (!c.points) continue;
+          for (const p of c.points) {
+            if (seenIds.has(p.id)) {
+              hasDuplicate = true;
+              break;
+            }
+            seenIds.add(p.id);
+          }
+          if (hasDuplicate) break;
+        }
+        if (hasDuplicate) {
+          let seq = 0;
+          existing.contours.forEach((c, cIdx) => {
+            if (!c.points) return;
+            c.points.forEach((p) => {
+              seq++;
+              p.id = `pt_${existing.unicode || selectedChar}_${cIdx}_${seq}`;
+            });
+          });
         }
       }
       return existing;
@@ -379,7 +408,15 @@ export const EditorPage: React.FC<EditorPageProps> = ({ fontId, onNavigate }) =>
       contours: [],
       hasCustomPath: false,
     };
-  }, [project.glyphs, selectedChar, project.family]);
+  }, [project, selectedChar]);
+
+  if (!project) {
+    return (
+      <div className="h-screen bg-neutral-950 flex items-center justify-center text-xs font-mono text-neutral-400">
+        Loading font workspace...
+      </div>
+    );
+  }
 
   // Primary selected point for inspector
   let currentSelectedPoint: VectorPoint | null = null;
